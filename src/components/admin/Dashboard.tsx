@@ -191,20 +191,6 @@ export function Dashboard({
             <Legend dot="bg-accent" label="Food & drinks" value={peso(foodRevenue)} />
           </Panel>
 
-          <Panel title="Shortcuts">
-            <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  ["schedule", "Schedule"],
-                  ["rooms", "Rooms"],
-                  ["menu", "Menu"],
-                  ["settings", "Settings"],
-                ] as [SectionKey, string][]
-              ).map(([k, l]) => (
-                <Button key={k} variant="outline" size="sm" onClick={() => onSection(k)}>{l}</Button>
-              ))}
-            </div>
-          </Panel>
         </div>
       </div>
     </div>
