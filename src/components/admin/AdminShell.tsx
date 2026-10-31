@@ -65,49 +65,45 @@ type Item = { key: SectionKey; title: string; icon: typeof Bell };
 
 const NAV: { label: string; items: Item[] }[] = [
   {
-    label: "Overview",
+    label: "Main Menu",
     items: [
       { key: "dashboard", title: "Dashboard", icon: LayoutDashboard },
-      { key: "reports", title: "Reports", icon: BarChart3 },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      { key: "bookings", title: "Bookings", icon: CalendarCheck },
-      { key: "schedule", title: "Schedule", icon: CalendarClock },
-      { key: "orders", title: "Food Orders", icon: ChefHat },
-      { key: "payments", title: "Payment Management", icon: CreditCard },
-    ],
-  },
-  {
-    label: "Catalog",
-    items: [
+      { key: "bookings", title: "Reservations", icon: CalendarCheck },
       { key: "rooms", title: "Rooms", icon: DoorOpen },
-      { key: "menu", title: "Menu", icon: UtensilsCrossed },
+      { key: "schedule", title: "Room Schedule", icon: CalendarClock },
+      { key: "users", title: "Customers", icon: Users },
     ],
   },
   {
-    label: "People",
+    label: "Business Management",
     items: [
-      { key: "users", title: "User Management", icon: Users },
+      { key: "menu", title: "Food & Beverages", icon: UtensilsCrossed },
+      { key: "orders", title: "Food Orders", icon: ChefHat },
+      { key: "payments", title: "Transactions", icon: CreditCard },
+      { key: "reports", title: "Reports & Analytics", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "System",
+    items: [
       { key: "messages", title: "Messages", icon: Mail },
+      { key: "settings", title: "Settings", icon: Settings },
     ],
   },
 ];
 
 export const SECTION_TITLES: Record<SectionKey, string> = {
   dashboard: "Dashboard",
-  bookings: "Bookings",
-  schedule: "Schedule",
+  bookings: "Reservations",
+  schedule: "Room Schedule",
   orders: "Food Orders",
-  payments: "Payment Management",
+  payments: "Transactions",
   rooms: "Rooms",
-  menu: "Menu",
-  users: "User Management",
+  menu: "Food & Beverages",
+  users: "Customers",
   messages: "Messages",
-  reports: "Reports",
-  settings: "Business Settings",
+  reports: "Reports & Analytics",
+  settings: "Settings",
 };
 
 export function AdminShell({
@@ -171,17 +167,6 @@ export function AdminShell({
           </SidebarContent>
           <SidebarFooter>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={section === "settings"}
-                  tooltip="Business Settings"
-                  onClick={() => onSection("settings")}
-                  className="data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
-                >
-                  <Settings />
-                  <span>Business Settings</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               <SignOutItem />
             </SidebarMenu>
           </SidebarFooter>
