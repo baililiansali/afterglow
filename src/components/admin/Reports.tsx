@@ -155,6 +155,14 @@ export function Reports({ res, orders }: { res: ResRow[]; orders: OrderRow[] }) 
               </tr>
             ))}
           </tbody>
+          {bookings.length > 0 && (
+            <tfoot>
+              <tr className="border-t border-border font-semibold">
+                <td colSpan={4} className="p-3">Paid total</td>
+                <td className="p-3 text-right">{peso(roomRevenue)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
