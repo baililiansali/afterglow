@@ -8,6 +8,13 @@
       "when": 1793428408412,
       "tag": "0000_afterglow_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793428455291,
+      "tag": "0001_afterglow_functions",
+      "breakpoints": true
     }
   ]
 }

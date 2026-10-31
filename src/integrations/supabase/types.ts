@@ -463,6 +463,71 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cancel_my_reservation: {
+        Args: { _reservation_id: string }
+        Returns: undefined
+      }
+      create_in_room_order: {
+        Args: {
+          _items: Json
+          _notes: string
+          _payer_account?: string
+          _payer_name?: string
+          _payment_method?: string
+          _payment_ref?: string
+          _reservation_id: string
+        }
+        Returns: string
+      }
+      create_reservation: {
+        Args: {
+          _date: string
+          _end: string
+          _guests: number
+          _items?: Json
+          _requests: string
+          _room_id: string
+          _start: string
+        }
+        Returns: string
+      }
+      create_reservation_v2: {
+        Args: {
+          _date: string
+          _end: string
+          _guests: number
+          _items?: Json
+          _payment_method?: string
+          _requests: string
+          _room_id: string
+          _start: string
+        }
+        Returns: string
+      }
+      create_reservation_v3: {
+        Args: {
+          _date: string
+          _end: string
+          _guests: number
+          _items: Json
+          _payer_account?: string
+          _payer_name?: string
+          _payment_method: string
+          _payment_ref?: string
+          _requests: string
+          _room_id: string
+          _start: string
+        }
+        Returns: string
+      }
+      expire_no_show_reservations: { Args: never; Returns: undefined }
+      get_room_busy_slots: {
+        Args: { _date: string; _room_id: string }
+        Returns: {
+          end_time: string
+          start_time: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
