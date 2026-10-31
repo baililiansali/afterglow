@@ -1,6 +1,6 @@
-[{"capability":"code","source":"TanStack Start app (code archive)","outcome":"migrate","status":"in_progress","next_action":"copy source"},
-{"capability":"schema+seed","source":"drizzle migrations 0000-0002","outcome":"migrate","status":"in_progress","next_action":"apply to Cloud"},
-{"capability":"auth","source":"email/password, first signup = admin","outcome":"migrate","status":"in_progress","next_action":"enable email auth"},
-{"capability":"storage","source":"avatars bucket","outcome":"migrate","status":"in_progress","next_action":"create bucket"},
-{"capability":"schedule","source":"hourly no-show expiry (pg_cron)","outcome":"migrate","status":"in_progress","next_action":"schedule job"},
-{"capability":"user_records","source":"old backend users/bookings","outcome":"migrate","status":"pending","next_action":"owner exports CSVs or skips"}]
+[{"capability":"code","source":"TanStack Start app (code archive)","outcome":"migrate","status":"verified","next_action":"none"},
+{"capability":"schema+seed","source":"drizzle migrations 0000-0002 (20 rooms, 9 menu items, 5 categories, settings)","outcome":"migrate","status":"verified","next_action":"none"},
+{"capability":"auth","source":"email/password, first signup = admin","outcome":"migrate","status":"implemented","next_action":"owner signs up first to become admin; sign-in not yet exercised"},
+{"capability":"storage","source":"avatars bucket (private, per-user folders)","outcome":"migrate","status":"implemented","next_action":"verify on first profile photo upload"},
+{"capability":"schedule","source":"hourly no-show expiry (pg_cron)","outcome":"migrate","status":"implemented","next_action":"none"},
+{"capability":"user_records","source":"old backend users/bookings","outcome":"migrate","status":"pending","next_action":"owner exports CSVs or replies Skip for now"}]
