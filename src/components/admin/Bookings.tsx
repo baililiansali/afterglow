@@ -71,7 +71,7 @@ export function Bookings({ res }: { res: ResRow[] }) {
             onClick={() => setFilter(s)}
             className="capitalize"
           >
-            {s.replace("_", " ")}
+            {s === "completed" ? "checked out" : s.replace("_", " ")}
           </Button>
         ))}
       </div>
