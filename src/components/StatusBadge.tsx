@@ -15,6 +15,10 @@ const tone: Record<string, string> = {
   unpaid: "bg-muted text-muted-foreground border-border",
 };
 
+export function statusLabel(status: string) {
+  return status === "completed" ? "checked out" : status.replace("_", " ");
+}
+
 export function StatusBadge({ status }: { status: string }) {
   return (
     <span
@@ -23,7 +27,7 @@ export function StatusBadge({ status }: { status: string }) {
         tone[status] ?? tone["served"],
       )}
     >
-      {status.replace("_", " ")}
+      {statusLabel(status)}
     </span>
   );
 }

@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/SiteChrome";
-import { StatusBadge, PaymentMethodBadge } from "@/components/StatusBadge";
+import { StatusBadge, PaymentMethodBadge, statusLabel } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -155,28 +155,69 @@ export function Reports({ res, orders }: { res: ResRow[]; orders: OrderRow[] }) 
               </tr>
             ))}
           </tbody>
+          {bookings.length > 0 && (
+            <tfoot>
+              <tr className="border-t border-border font-semibold">
+                <td colSpan={4} className="p-3">Paid total</td>
+                <td className="p-3 text-right">{peso(roomRevenue)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      <h2 className="font-display text-2xl font-bold">Food orders</h2>
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead className="bg-secondary/50 text-left text-muted-foreground">
+            <tr>
+              <th className="p-3">Order #</th>
+              <th>Room</th>
+              <th>Items</th>
+              <th>Status</th>
+              <th className="p-3 text-right">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orderRows.length === 0 && (
+              <tr>
+                <td colSpan={5} className="p-4 text-muted-foreground">
+                  No food orders in this range.
+                </td>
+              </tr>
+            )}
+            {orderRows.map((o) => (
+              <tr key={o.id} className="border-t border-border">
+                <td className="p-3">{o.reference_code}</td>
+                <td>{o.reservations?.rooms?.name ?? "—"}</td>
+                <td className="py-3 pr-3">
+                  {o.food_order_items.map((i) => `${i.quantity}× ${i.item_name_snapshot}`).join(", ") || "—"}
+                </td>
+                <td>
+                  <StatusBadge status={o.status} />
+                </td>
+                <td className="p-3 text-right">{peso(o.food_subtotal)}</td>
+              </tr>
+            ))}
+          </tbody>
+          {orderRows.length > 0 && (
+            <tfoot>
+              <tr className="border-t border-border font-semibold">
+                <td colSpan={4} className="p-3">Served total</td>
+                <td className="p-3 text-right">{peso(foodRevenue)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
       <h2 className="font-display text-2xl font-bold">Totals</h2>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2">
         <TotalCard
           title="Bookings by status"
           total={String(bookings.length)}
-          rows={byStatus.map((b) => [b.s.replace("_", " "), String(b.n)])}
+          rows={byStatus.map((b) => [statusLabel(b.s), String(b.n)])}
           empty="No bookings in this range."
-        />
-        <TotalCard
-          title="Room charges (paid)"
-          total={peso(roomRevenue)}
-          rows={byRoom.map(([k, v]) => [k, peso(v)])}
-          empty="No paid bookings in this range."
-        />
-        <TotalCard
-          title="Food sales (served)"
-          total={peso(foodRevenue)}
-          rows={orderStatus.map((o) => [o.s, `${o.n} order${o.n === 1 ? "" : "s"}`])}
-          empty="No food orders in this range."
         />
         <TotalCard
           title="Bestselling items"
