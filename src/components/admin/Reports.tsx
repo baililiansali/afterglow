@@ -36,102 +36,95 @@ export function Reports({ res, orders }: { res: ResRow[]; orders: OrderRow[] }) 
       .slice(0, 10);
     return { from, to };
   });
-  const inRange = (d: string) => d >= range.from && d <= range.to;
+  const inRange = (d: string) => (!range.from || d >= range.from) && (!range.to || d <= range.to);
   const bookings = res.filter((r) => inRange(r.booking_date));
   const orderRows = orders.filter((o) => o.reservations && inRange(o.reservations.booking_date));
-  const roomRevenue = bookings
-    .filter((r) => r.payment_status === "paid")
-    .reduce((s, r) => s + Number(r.room_total), 0);
-  const foodRevenue = orderRows
-    .filter((o) => o.status === "served")
-    .reduce((s, o) => s + Number(o.food_subtotal), 0);
+  const paid = bookings.filter((r) => r.payment_status === "paid");
+  const roomRevenue = paid.reduce((s, r) => s + Number(r.room_total), 0);
+  const served = orderRows.filter((o) => o.status === "served");
+  const foodRevenue = served.reduce((s, o) => s + Number(o.food_subtotal), 0);
   const byStatus = (
     ["pending", "approved", "checked_in", "completed", "rejected", "cancelled"] as ResStatus[]
-  ).map((s) => ({
-    s,
-    n: bookings.filter((r) => r.status === s).length,
-  }));
+  ).map((s) => ({ s, n: bookings.filter((r) => r.status === s).length }));
+  const roomMap = new Map<string, number>();
+  for (const r of paid)
+    roomMap.set(r.rooms?.name ?? "—", (roomMap.get(r.rooms?.name ?? "—") ?? 0) + Number(r.room_total));
+  const byRoom = [...roomMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   const sold = new Map<string, number>();
   for (const o of orderRows)
     for (const i of o.food_order_items)
       sold.set(i.item_name_snapshot, (sold.get(i.item_name_snapshot) ?? 0) + i.quantity);
   const best = [...sold.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const orderStatus = (["pending", "confirmed", "preparing", "ready", "served", "cancelled"] as FoStatus[])
+    .map((s) => ({ s, n: orderRows.filter((o) => o.status === s).length }))
+    .filter((x) => x.n > 0);
+
+  const dateCls =
+    "w-44 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-80";
+
+  const TotalCard = ({
+    title,
+    total,
+    rows,
+    empty,
+  }: {
+    title: string;
+    total: string;
+    rows: [string, string][];
+    empty: string;
+  }) => (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <p className="font-display text-lg font-semibold">{title}</p>
+      <div className="mt-4 flex items-center justify-between border-b border-border pb-3 text-sm font-semibold uppercase tracking-wide">
+        <span>Total</span>
+        <span className="font-display text-base">{total}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="pt-3 text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        rows.map(([k, v]) => (
+          <div
+            key={k}
+            className="flex items-center justify-between border-b border-border/60 py-2.5 text-sm last:border-0"
+          >
+            <span className="capitalize text-muted-foreground">{k}</span>
+            <span>{v}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
 
   return (
     <div className="mt-4 space-y-6">
-      <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <Label htmlFor="rep-from">From</Label>
+      <div className="flex flex-wrap items-end gap-4 rounded-xl border border-border bg-card p-4">
+        <div className="space-y-1">
+          <Label htmlFor="rep-from" className="text-xs text-muted-foreground">From</Label>
           <Input
             id="rep-from"
             type="date"
             value={range.from}
             onChange={(e) => setRange({ ...range, from: e.target.value })}
-            className="w-40"
+            className={dateCls}
           />
         </div>
-        <div>
-          <Label htmlFor="rep-to">To</Label>
+        <div className="space-y-1">
+          <Label htmlFor="rep-to" className="text-xs text-muted-foreground">To</Label>
           <Input
             id="rep-to"
             type="date"
             value={range.to}
             onChange={(e) => setRange({ ...range, to: e.target.value })}
-            className="w-40"
+            className={dateCls}
           />
         </div>
+        <p className="ml-auto text-sm text-muted-foreground">
+          {bookings.length} booking{bookings.length === 1 ? "" : "s"} · {orderRows.length} food order
+          {orderRows.length === 1 ? "" : "s"}
+        </p>
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">Bookings in range</p>
-          <p className="mt-1 font-display text-2xl font-bold">{bookings.length}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">Room charges (paid)</p>
-          <p className="mt-1 font-display text-2xl font-bold">{peso(roomRevenue)}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">Food orders</p>
-          <p className="mt-1 font-display text-2xl font-bold">{orderRows.length}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">Food sales (served)</p>
-          <p className="mt-1 font-display text-2xl font-bold">{peso(foodRevenue)}</p>
-        </div>
-      </div>
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="font-medium">Bookings by status</p>
-          <table className="mt-2 w-full text-sm">
-            <tbody>
-              {byStatus.map((b) => (
-                <tr key={b.s}>
-                  <td className="py-1 capitalize text-muted-foreground">{b.s.replace("_", " ")}</td>
-                  <td className="text-right">{b.n}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="font-medium">Bestselling items</p>
-          {best.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">No food orders in this range.</p>
-          ) : (
-            <table className="mt-2 w-full text-sm">
-              <tbody>
-                {best.map(([name, q]) => (
-                  <tr key={name}>
-                    <td className="py-1">{name}</td>
-                    <td className="text-right text-muted-foreground">{q} sold</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-      <div className="overflow-x-auto rounded-xl border border-border">
+
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
         <table className="w-full text-sm">
           <thead className="bg-secondary/50 text-left text-muted-foreground">
             <tr>
@@ -139,7 +132,7 @@ export function Reports({ res, orders }: { res: ResRow[]; orders: OrderRow[] }) 
               <th>Room</th>
               <th>Date</th>
               <th>Status</th>
-              <th className="text-right">Room total</th>
+              <th className="p-3 text-right">Room total</th>
             </tr>
           </thead>
           <tbody>
@@ -158,11 +151,39 @@ export function Reports({ res, orders }: { res: ResRow[]; orders: OrderRow[] }) 
                 <td>
                   <StatusBadge status={r.status} />
                 </td>
-                <td className="text-right">{peso(r.room_total)}</td>
+                <td className="p-3 text-right">{peso(r.room_total)}</td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      <h2 className="font-display text-2xl font-bold">Totals</h2>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <TotalCard
+          title="Bookings by status"
+          total={String(bookings.length)}
+          rows={byStatus.map((b) => [b.s.replace("_", " "), String(b.n)])}
+          empty="No bookings in this range."
+        />
+        <TotalCard
+          title="Room charges (paid)"
+          total={peso(roomRevenue)}
+          rows={byRoom.map(([k, v]) => [k, peso(v)])}
+          empty="No paid bookings in this range."
+        />
+        <TotalCard
+          title="Food sales (served)"
+          total={peso(foodRevenue)}
+          rows={orderStatus.map((o) => [o.s, `${o.n} order${o.n === 1 ? "" : "s"}`])}
+          empty="No food orders in this range."
+        />
+        <TotalCard
+          title="Bestselling items"
+          total={`${[...sold.values()].reduce((a, b) => a + b, 0)} sold`}
+          rows={best.map(([k, v]) => [k, `${v} sold`])}
+          empty="No food orders in this range."
+        />
       </div>
     </div>
   );
