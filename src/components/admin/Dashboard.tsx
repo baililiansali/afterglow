@@ -1,4 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowRight, CalendarCheck, CalendarDays, Clock, DoorClosed, DoorOpen, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -7,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { errMsg, fmtDate, fmtTime, peso } from "@/lib/afterglow";
 import { useAuth } from "@/lib/auth";
 import { useMyProfile } from "@/lib/avatar";
-import { roomsQuery } from "@/lib/queries";
+import { roomsQuery, settingsQuery } from "@/lib/queries";
 import type { SectionKey } from "./AdminShell";
 import { useProfiles, type OrderRow, type ResRow, type ResStatus } from "./shared";
 
@@ -34,6 +36,8 @@ export function Dashboard({
   const profile = useMyProfile(user?.id) as unknown as { data?: { full_name?: string | null } } | undefined;
   const { data: profiles = {} } = useProfiles();
   const { data: rooms = [] } = useQuery(roomsQuery);
+  const { data: settings } = useQuery(settingsQuery);
+  const [openRoom, setOpenRoom] = useState<{ name: string; room_number: string } | null>(null);
 
   // Manila local time (UTC+8)
   const manila = new Date(Date.now() + 8 * 3600 * 1000).toISOString();
@@ -198,19 +202,98 @@ export function Dashboard({
             </div>
             <div className="grid grid-cols-4 gap-2">
               {roomStates.map(({ room, state, r }) => (
-                <div
+                <button
+                  type="button"
+                  onClick={() => setOpenRoom(room)}
                   key={room.room_number}
                   title={`${room.name} — ${ROOM_STYLE[state].label}${r ? ` (${fmtTime(r.start_time)}–${fmtTime(r.end_time)})` : ""}`}
-                  className={`rounded-lg border bg-background/40 p-2 text-center ${ROOM_STYLE[state].cls}`}
+                  className={`rounded-lg border bg-background/40 p-2 text-center transition hover:border-primary ${ROOM_STYLE[state].cls}`}
                 >
                   <p className="font-display text-sm font-bold">{room.room_number}</p>
                   <p className="truncate text-[10px]">{r ? `til ${fmtTime(r.end_time)}` : ROOM_STYLE[state].label}</p>
-                </div>
+                </button>
               ))}
             </div>
+            <p className="text-[11px] text-muted-foreground">Tap a room to see today's full schedule.</p>
           </Panel>
         </div>
       </div>
+
+      <Dialog open={!!openRoom} onOpenChange={(o) => !o && setOpenRoom(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {openRoom?.name} · Today's schedule
+            </DialogTitle>
+          </DialogHeader>
+          {openRoom && (
+            <RoomDay
+              rows={todays.filter((r) => r.rooms?.room_number === openRoom.room_number)}
+              open={settings?.opening_time?.slice(0, 5) ?? "12:00"}
+              close={settings?.closing_time?.slice(0, 5) ?? "24:00"}
+              nowTime={nowTime}
+              name={name}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+const toT = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+const hrs = (m: number) => `${+(m / 60).toFixed(1)} hr${m === 60 ? "" : "s"}`;
+
+function RoomDay({ rows, open, close, nowTime, name }: { rows: ResRow[]; open: string; close: string; nowTime: string; name: (uid: string) => string }) {
+  const o = toMin(open);
+  let c = toMin(close);
+  if (c <= o) c += 24 * 60;
+  const now = toMin(nowTime);
+  const sorted = [...rows].sort((a, b) => a.start_time.localeCompare(b.start_time));
+  type Item = { kind: "gap"; s: number; e: number } | { kind: "res"; r: ResRow; s: number; e: number };
+  const items: Item[] = [];
+  let cur = o;
+  for (const r of sorted) {
+    const s = toMin(r.start_time);
+    let e = toMin(r.end_time);
+    if (e <= s) e += 24 * 60;
+    if (s > cur) items.push({ kind: "gap", s: cur, e: s });
+    items.push({ kind: "res", r, s, e });
+    cur = Math.max(cur, e);
+  }
+  if (cur < c) items.push({ kind: "gap", s: cur, e: c });
+
+  const label = (it: Extract<Item, { kind: "res" }>) => {
+    if (it.r.status === "checked_in") return { t: "In room now", cls: "border-primary/70 text-primary" };
+    if (it.r.status === "completed" || it.e <= now) return { t: "Finished", cls: "border-border text-muted-foreground" };
+    if (it.r.status === "pending") return { t: "Pending approval", cls: "border-accent/60 text-accent" };
+    return { t: "Reserved", cls: "border-accent/60 text-accent" };
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Open {fmtTime(open)} – {fmtTime(close)}
+      </p>
+      {items.map((it, i) =>
+        it.kind === "gap" ? (
+          it.e <= now ? null : (
+            <div key={i} className="rounded-xl border border-dashed border-glow/50 p-3 text-sm text-glow">
+              Open {fmtTime(toT(Math.max(it.s, now)))} – {fmtTime(toT(it.e))} · {hrs(it.e - Math.max(it.s, now))} free
+            </div>
+          )
+        ) : (
+          <div key={i} className={`rounded-xl border bg-background/40 p-3 text-sm ${label(it).cls}`}>
+            <p className="font-medium">
+              {fmtTime(it.r.start_time)} – {fmtTime(it.r.end_time)} · {label(it).t}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {it.r.reference_code} · {name(it.r.user_id)} · {it.r.guest_count} guests
+            </p>
+          </div>
+        ),
+      )}
     </div>
   );
 }
