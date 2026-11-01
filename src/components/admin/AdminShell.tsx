@@ -1,3 +1,13 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Bell,
@@ -182,6 +192,7 @@ export function AdminShell({
             </div>
           </header>
           <main className="flex-1 px-4 py-6 md:px-8">{children}</main>
+          <LogoutConfirm />
         </div>
       </div>
     </SidebarProvider>
@@ -189,20 +200,49 @@ export function AdminShell({
 }
 
 function useSignOut() {
+  return () => window.dispatchEvent(new Event("afterglow:logout"));
+}
+
+function LogoutConfirm() {
   const navigate = useNavigate();
-  return async () => {
-    await supabase.auth.signOut();
-    navigate({ to: "/" });
-  };
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const h = () => setOpen(true);
+    window.addEventListener("afterglow:logout", h);
+    return () => window.removeEventListener("afterglow:logout", h);
+  }, []);
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Logout Confirmation</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to log out of your admin account?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={async () => {
+              await supabase.auth.signOut();
+              navigate({ to: "/login" });
+            }}
+          >
+            Logout
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }
 
 function SignOutItem() {
   const signOut = useSignOut();
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton tooltip="Sign out" onClick={signOut}>
+      <SidebarMenuButton tooltip="Logout" onClick={signOut}>
         <LogOut />
-        <span>Sign out</span>
+        <span>Logout</span>
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
@@ -238,7 +278,7 @@ function AdminProfile() {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={signOut}>
-          <LogOut className="mr-2 h-4 w-4" /> Sign out
+          <LogOut className="mr-2 h-4 w-4" /> Logout
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

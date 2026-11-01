@@ -59,6 +59,12 @@ export type ResRow = {
   payer_account_number: string | null;
   payment_reference: string | null;
   special_requests: string | null;
+  room_id: string;
+  room_rate_snapshot: number;
+  rejection_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  checked_out_at: string | null;
   rooms: { name: string; room_number: string } | null;
 };
 
