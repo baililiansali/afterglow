@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+
 import { PageHeader } from "@/components/SiteChrome";
 import { StatusBadge, PaymentMethodBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -9,34 +10,55 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
 import { supabase } from "@/integrations/supabase/client";
 import { ROOM_IMAGES, errMsg, fmtDate, fmtTime, foodImage, peso } from "@/lib/afterglow";
+
 import { ImagePicker } from "@/components/ImagePicker";
 import { useAuth } from "@/lib/auth";
 import { menuQuery, roomsQuery, settingsQuery } from "@/lib/queries";
+
 import type { Database } from "@/integrations/supabase/types";
+
 export type ResStatus = Database["public"]["Enums"]["reservation_status"];
-export type FoStatus = Database["public"]["Enums"]["food_order_status"];
+
+export type FoStatus = Extract<
+  Database["public"]["Enums"]["food_order_status"],
+  "pending" | "confirmed" | "served" | "cancelled"
+>;
 
 export function useProfiles() {
   return useQuery({
     queryKey: ["admin-profiles"],
     queryFn: async () => {
       const { data, error } = await supabase.from("profiles").select("*");
+
       if (error) throw error;
+
       // Temporary links to customer photos (the photos folder is private).
       const paths = data.map((p) => p.avatar_url).filter((x): x is string => !!x);
+
       const photos: Record<string, string> = {};
+
       if (paths.length) {
         const { data: signed } = await supabase.storage
           .from("avatars")
           .createSignedUrls(paths, 60 * 60);
-        for (const s of signed ?? []) if (s.path && s.signedUrl) photos[s.path] = s.signedUrl;
+
+        for (const s of signed ?? []) {
+          if (s.path && s.signedUrl) {
+            photos[s.path] = s.signedUrl;
+          }
+        }
       }
+
       return Object.fromEntries(
         data.map((p) => [
           p.id,
-          { ...p, photo: p.avatar_url ? (photos[p.avatar_url] ?? null) : null },
+          {
+            ...p,
+            photo: p.avatar_url ? (photos[p.avatar_url] ?? null) : null,
+          },
         ]),
       );
     },
@@ -65,33 +87,60 @@ export type ResRow = {
   created_at: string;
   updated_at: string;
   checked_out_at: string | null;
-  rooms: { name: string; room_number: string } | null;
-};
-
-export const NEXT: Partial<Record<FoStatus, FoStatus>> = {
-  pending: "confirmed",
-  confirmed: "preparing",
-  preparing: "ready",
-  ready: "served",
+  rooms: {
+    name: string;
+    room_number: string;
+  } | null;
 };
 
 export type OrderRow = {
   id: string;
   reference_code: string;
-  order_type: string;
+  user_id: string;
+  reservation_id: string;
+  order_type: "pre_order" | "in_room";
   status: FoStatus;
   food_subtotal: number;
+  payment_method: string;
+  payment_status: "unpaid" | "paid";
+  payer_name: string | null;
+  payer_account_number: string | null;
+  payment_reference: string | null;
   special_instructions: string | null;
-  food_order_items: { id: string; quantity: number; item_name_snapshot: string }[];
+  submitted_at: string;
+  created_at: string;
+  served_at: string | null;
+
+  food_order_items: {
+    id: string;
+    menu_item_id: string | null;
+    item_name_snapshot: string;
+    unit_price_snapshot: number;
+    quantity: number;
+    line_total: number;
+  }[];
+
   reservations: {
     reference_code: string;
     booking_date: string;
-    rooms: { name: string } | null;
+    rooms: {
+      id: string;
+      name: string;
+      room_number: string;
+    } | null;
+  } | null;
+
+  profiles: {
+    full_name: string | null;
+    email: string | null;
+    phone: string | null;
   } | null;
 };
 
 export type RoomType = Database["public"]["Enums"]["room_type"];
+
 export const ROOM_TYPES: RoomType[] = ["small", "medium", "large", "vip"];
+
 export const emptyRoom = {
   room_number: "",
   name: "",
@@ -124,6 +173,7 @@ export function ViewToggle({
       >
         List
       </Button>
+
       <Button
         type="button"
         size="sm"

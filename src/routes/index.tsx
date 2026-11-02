@@ -35,8 +35,18 @@ const TYPES: { type: RoomType; cap: number; rate: number }[] = [
 
 function Home() {
   useRedirectAdmin();
+
   const { data } = useQuery(menuQuery);
-  const featured = data?.items.filter((i) => i.is_featured && i.is_available) ?? [];
+
+  // Only show active, available, featured items from active categories.
+  const activeCategoryIds = new Set(
+    (data?.categories ?? []).filter((c) => c.is_active).map((c) => c.id),
+  );
+
+  const featured =
+    data?.items.filter(
+      (i) => i.is_active && i.is_featured && i.is_available && activeCategoryIds.has(i.category_id),
+    ) ?? [];
 
   return (
     <div>
@@ -46,22 +56,28 @@ function Home() {
           alt="Neon-lit private karaoke room"
           className="absolute inset-0 h-full w-full object-cover opacity-40"
         />
+
         <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-background/70 to-background" />
+
         <div className="relative mx-auto max-w-6xl px-4 pb-28 pt-28 md:pt-40">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accent">
             Private karaoke lounge
           </p>
+
           <h1 className="mt-4 max-w-3xl font-display text-5xl font-bold leading-[1.05] md:text-7xl">
             Your room. Your crew. <span className="text-gradient-glow">Your encore.</span>
           </h1>
+
           <p className="mt-6 max-w-xl text-lg text-muted-foreground">
             Book a private room in minutes, pre-order food, and we'll have everything ready when you
             walk in.
           </p>
+
           <div className="mt-8 flex flex-wrap gap-3">
             <Button asChild variant="glow" size="lg">
               <Link to="/rooms">Book a room</Link>
             </Button>
+
             <Button asChild variant="outline" size="lg">
               <Link to="/menu">See the menu</Link>
             </Button>
@@ -88,10 +104,12 @@ function Home() {
       <section className="mx-auto max-w-6xl px-4 pt-20">
         <div className="flex items-end justify-between">
           <h2 className="font-display text-3xl font-bold">Rooms for every crew</h2>
+
           <Link to="/rooms" className="text-sm text-primary">
             All rooms →
           </Link>
         </div>
+
         <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {TYPES.map((r) => (
             <Link
@@ -106,8 +124,10 @@ function Home() {
                 className="aspect-[4/3] w-full object-cover transition-transform duration-500 group-hover:scale-105"
                 loading="lazy"
               />
+
               <div className="p-4">
                 <p className="font-display text-lg font-bold">{ROOM_TYPE_LABELS[r.type]}</p>
+
                 <p className="text-sm text-muted-foreground">
                   Up to {r.cap} guests · <span className="text-accent">{peso(r.rate)}/hr</span>
                 </p>
@@ -120,6 +140,7 @@ function Home() {
       {featured.length > 0 && (
         <section className="mx-auto max-w-6xl px-4 pt-20">
           <h2 className="font-display text-3xl font-bold">Crowd favorites</h2>
+
           <div className="mt-6 grid gap-5 sm:grid-cols-3">
             {featured.map((f) => (
               <Link
@@ -134,8 +155,10 @@ function Home() {
                   className="aspect-square w-full object-cover transition-transform duration-500 group-hover:scale-105"
                   loading="lazy"
                 />
+
                 <div className="flex items-center justify-between p-4">
                   <p className="font-medium group-hover:text-primary">{f.name}</p>
+
                   <p className="text-accent">{peso(f.price)}</p>
                 </div>
               </Link>
