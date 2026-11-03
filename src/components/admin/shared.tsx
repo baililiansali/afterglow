@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Grid2X2, List } from "lucide-react";
 
 import { PageHeader } from "@/components/SiteChrome";
 import { StatusBadge, PaymentMethodBadge } from "@/components/StatusBadge";
@@ -20,12 +21,9 @@ import { menuQuery, roomsQuery, settingsQuery } from "@/lib/queries";
 
 import type { Database } from "@/integrations/supabase/types";
 
-export type ResStatus = Database["public"]["Enums"]["reservation_status"];
-
-export type FoStatus = Extract<
-  Database["public"]["Enums"]["food_order_status"],
-  "pending" | "confirmed" | "served" | "cancelled"
->;
+// =====================================================
+// PROFILES HOOK
+// =====================================================
 
 export function useProfiles() {
   return useQuery({
@@ -35,35 +33,44 @@ export function useProfiles() {
 
       if (error) throw error;
 
-      // Temporary links to customer photos (the photos folder is private).
-      const paths = data.map((p) => p.avatar_url).filter((x): x is string => !!x);
+      const mapped: Record<string, any> = {};
 
-      const photos: Record<string, string> = {};
+      for (const profile of data ?? []) {
+        let photo: string | null = profile.avatar_url ?? null;
 
-      if (paths.length) {
-        const { data: signed } = await supabase.storage
-          .from("avatars")
-          .createSignedUrls(paths, 60 * 60);
+        if (photo && !photo.startsWith("http")) {
+          const { data: signed, error: signedError } = await supabase.storage
+            .from("avatars")
+            .createSignedUrl(photo, 3600);
 
-        for (const s of signed ?? []) {
-          if (s.path && s.signedUrl) {
-            photos[s.path] = s.signedUrl;
+          if (!signedError) {
+            photo = signed?.signedUrl ?? null;
+          } else {
+            photo = null;
           }
         }
+
+        mapped[profile.id] = {
+          ...profile,
+          photo,
+        };
       }
 
-      return Object.fromEntries(
-        data.map((p) => [
-          p.id,
-          {
-            ...p,
-            photo: p.avatar_url ? (photos[p.avatar_url] ?? null) : null,
-          },
-        ]),
-      );
+      return mapped;
     },
   });
 }
+
+// =====================================================
+// RESERVATION TYPES
+// =====================================================
+
+export type ResStatus = Database["public"]["Enums"]["reservation_status"];
+
+export type FoStatus = Extract<
+  Database["public"]["Enums"]["food_order_status"],
+  "pending" | "confirmed" | "served" | "cancelled"
+>;
 
 export type ResRow = {
   id: string;
@@ -97,7 +104,7 @@ export type OrderRow = {
   id: string;
   reference_code: string;
   user_id: string;
-  reservation_id: string;
+  reservation_id: string | null;
   order_type: "pre_order" | "in_room";
   status: FoStatus;
   food_subtotal: number;
@@ -107,35 +114,36 @@ export type OrderRow = {
   payer_account_number: string | null;
   payment_reference: string | null;
   special_instructions: string | null;
-  submitted_at: string;
+  submitted_at: string | null;
   created_at: string;
   served_at: string | null;
-
   food_order_items: {
     id: string;
+    food_order_id: string;
     menu_item_id: string | null;
     item_name_snapshot: string;
     unit_price_snapshot: number;
     quantity: number;
     line_total: number;
   }[];
-
   reservations: {
     reference_code: string;
     booking_date: string;
     rooms: {
-      id: string;
       name: string;
       room_number: string;
     } | null;
   } | null;
-
   profiles: {
     full_name: string | null;
     email: string | null;
     phone: string | null;
   } | null;
 };
+
+// =====================================================
+// ROOM TYPES
+// =====================================================
 
 export type RoomType = Database["public"]["Enums"]["room_type"];
 
@@ -152,35 +160,34 @@ export const emptyRoom = {
   image_url: "",
 };
 
-export function ViewToggle({
-  view,
-  setView,
-}: {
+// =====================================================
+// GRID AND LIST VIEW TOGGLE
+// =====================================================
+
+type ViewToggleProps = {
   view: "list" | "grid";
-  setView: (v: "list" | "grid") => void;
-}) {
+  setView: (view: "list" | "grid") => void;
+};
+
+export function ViewToggle({ view, setView }: ViewToggleProps) {
   return (
-    <div
-      className="ml-auto flex rounded-md border border-border p-0.5"
-      role="group"
-      aria-label="View"
-    >
+    <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
       <Button
-        type="button"
         size="sm"
-        variant={view === "list" ? "secondary" : "ghost"}
-        onClick={() => setView("list")}
+        variant={view === "grid" ? "default" : "ghost"}
+        onClick={() => setView("grid")}
       >
-        List
+        <Grid2X2 className="mr-1.5 h-4 w-4" />
+        Grid
       </Button>
 
       <Button
-        type="button"
         size="sm"
-        variant={view === "grid" ? "secondary" : "ghost"}
-        onClick={() => setView("grid")}
+        variant={view === "list" ? "default" : "ghost"}
+        onClick={() => setView("list")}
       >
-        Grid
+        <List className="mr-1.5 h-4 w-4" />
+        List
       </Button>
     </div>
   );

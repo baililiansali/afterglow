@@ -85,16 +85,16 @@ const NAV: { label: string; items: Item[] }[] = [
     label: "RESERVATIONS & ROOMS",
     items: [
       { key: "bookings", title: "Reservations", icon: CalendarCheck },
+      { key: "schedule", title: "Room Schedule", icon: CalendarClock },
       { key: "sessions", title: "Room Sessions", icon: CalendarClock },
       { key: "rooms", title: "Rooms", icon: DoorOpen },
-      { key: "schedule", title: "Room Schedule", icon: CalendarClock },
     ],
   },
   {
     label: "FOOD & BEVERAGE",
     items: [
-      { key: "menu", title: "Food & Beverages", icon: UtensilsCrossed },
       { key: "orders", title: "Food Orders", icon: ChefHat },
+      { key: "menu", title: "Food & Beverages", icon: UtensilsCrossed },
     ],
   },
   {

@@ -236,7 +236,12 @@ export function Dashboard({
                   Approve
                 </Button>
 
-                <Button size="sm" variant="outline" onClick={() => setStatus(r.id, "rejected")}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-red-300 text-red-600 hover:border-red-400 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                  onClick={() => setStatus(r.id, "rejected")}
+                >
                   Reject
                 </Button>
               </div>

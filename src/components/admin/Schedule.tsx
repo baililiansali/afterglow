@@ -1,34 +1,36 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock,
-  Users,
   CalendarCheck,
-  LayoutGrid,
+  Search,
+  Filter,
+  X,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
-import { PageHeader } from "@/components/SiteChrome";
-import { StatusBadge, PaymentMethodBadge } from "@/components/StatusBadge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { roomsQuery, settingsQuery } from "@/lib/queries";
-import { fmtDate, fmtTime, peso } from "@/lib/afterglow";
+import { fmtDate, fmtTime } from "@/lib/afterglow";
 
 import { useProfiles, type ResRow } from "./shared";
 
 type ViewMode = "daily" | "weekly" | "monthly";
-type RoomStatusFilter = "all" | "available" | "reserved" | "occupied" | "maintenance";
 
 type RoomRow = {
   id: string;
   name: string;
   room_number?: string | null;
+  room_type?: string | null;
+  type?: string | null;
   is_active?: boolean | null;
   maintenance_status?: boolean | null;
 };
@@ -38,52 +40,17 @@ type BusinessSettings = {
   closing_time?: string | null;
 };
 
-const ROOM_STATUS_OPTIONS: {
-  value: RoomStatusFilter;
-  label: string;
-  dot: string;
-}[] = [
-  { value: "all", label: "All room statuses", dot: "" },
-  { value: "available", label: "Available" },
-  { value: "reserved", label: "Reserved" },
-  { value: "occupied", label: "Occupied" },
-  { value: "maintenance", label: "Maintenance" },
-];
+const SELECTED_RESERVATION_KEY = "afterglow:selected-reservation";
 
-const RESERVATION_COLORS: Record<string, string> = {
+const RESERVATION_STATUSES = ["pending", "approved", "rejected", "cancelled"] as const;
+
+type ScheduleReservationStatus = (typeof RESERVATION_STATUSES)[number];
+
+const RESERVATION_COLORS: Record<ScheduleReservationStatus, string> = {
   pending: "border-l-amber-400 bg-amber-500/10",
   approved: "border-l-yellow-500 bg-yellow-500/10",
   rejected: "border-l-red-500 bg-red-500/10",
   cancelled: "border-l-muted-foreground bg-muted",
-  checked_in: "border-l-blue-500 bg-blue-500/10",
-  completed: "border-l-emerald-500 bg-emerald-500/10",
-  no_show: "border-l-orange-500 bg-orange-500/10",
-};
-
-const ROOM_STATUS_STYLES: Record<
-  Exclude<RoomStatusFilter, "all">,
-  { label: string; dot: string; text: string }
-> = {
-  available: {
-    label: "Available",
-    dot: "bg-emerald-500",
-    text: "text-emerald-600",
-  },
-  reserved: {
-    label: "Reserved",
-    dot: "bg-yellow-500",
-    text: "text-yellow-600",
-  },
-  occupied: {
-    label: "Occupied",
-    dot: "bg-blue-500",
-    text: "text-blue-600",
-  },
-  maintenance: {
-    label: "Maintenance",
-    dot: "bg-orange-500",
-    text: "text-orange-600",
-  },
 };
 
 function getLocalDateString(date: Date) {
@@ -102,6 +69,7 @@ function parseDate(date: string) {
 function addDays(date: string, amount: number) {
   const result = parseDate(date);
   result.setDate(result.getDate() + amount);
+
   return getLocalDateString(result);
 }
 
@@ -109,6 +77,7 @@ function addMonths(date: string, amount: number) {
   const result = parseDate(date);
   result.setDate(1);
   result.setMonth(result.getMonth() + amount);
+
   return getLocalDateString(result);
 }
 
@@ -122,6 +91,7 @@ function getWeekDates(date: string) {
   return Array.from({ length: 7 }, (_, index) => {
     const current = new Date(sunday);
     current.setDate(sunday.getDate() + index);
+
     return getLocalDateString(current);
   });
 }
@@ -163,33 +133,27 @@ function getReservationStatus(reservation: ResRow) {
   return String(reservation.status).toLowerCase();
 }
 
-function isConfirmedReservation(reservation: ResRow) {
+function getScheduleReservationStatus(reservation: ResRow): ScheduleReservationStatus | null {
   const status = getReservationStatus(reservation);
-  return status === "approved" || status === "checked_in";
+
+  return RESERVATION_STATUSES.includes(status as ScheduleReservationStatus)
+    ? (status as ScheduleReservationStatus)
+    : null;
 }
 
-function getRoomStatus(
-  room: RoomRow,
-  reservations: ResRow[],
-  date: string,
-): Exclude<RoomStatusFilter, "all">[] {
-  if (room.is_active === false || room.maintenance_status === true) {
-    return ["maintenance"];
-  }
+function isConfirmedReservation(reservation: ResRow) {
+  return getReservationStatus(reservation) === "approved";
+}
+
+function getRoomStatus(room: RoomRow, reservations: ResRow[], date: string) {
+  if (room.is_active === false) return "inactive";
+  if (room.maintenance_status === true) return "maintenance";
 
   const roomReservations = reservations.filter(
     (reservation) =>
       reservation.room_id === room.id &&
       reservation.booking_date === date &&
       isConfirmedReservation(reservation),
-  );
-
-  const occupied = roomReservations.some(
-    (reservation) => getReservationStatus(reservation) === "checked_in",
-  );
-
-  const reserved = roomReservations.some(
-    (reservation) => getReservationStatus(reservation) === "approved",
   );
 
   const opening = 14 * 60;
@@ -202,15 +166,7 @@ function getRoomStatus(
     return total + Math.max(0, end - start);
   }, 0);
 
-  const hasAvailableTime = bookedMinutes < closing - opening;
-
-  const statuses: Exclude<RoomStatusFilter, "all">[] = [];
-
-  if (hasAvailableTime) statuses.push("available");
-  if (reserved) statuses.push("reserved");
-  if (occupied) statuses.push("occupied");
-
-  return statuses;
+  return bookedMinutes >= closing - opening ? "full" : "available";
 }
 
 function getReservationPosition(
@@ -219,9 +175,7 @@ function getReservationPosition(
   closingMinutes: number,
 ) {
   const start = Math.max(toMinutes(reservation.start_time), openingMinutes);
-
   const end = Math.min(toMinutes(reservation.end_time), closingMinutes);
-
   const duration = closingMinutes - openingMinutes;
 
   return {
@@ -258,13 +212,20 @@ function sameDate(a: string, b: string) {
 }
 
 export function Schedule({ res }: { res: ResRow[] }) {
+  const navigate = useNavigate();
+
   const [date, setDate] = useState(() => getLocalDateString(new Date()));
-
   const [view, setView] = useState<ViewMode>("daily");
-  const [roomFilter, setRoomFilter] = useState("all");
-  const [roomStatusFilter, setRoomStatusFilter] = useState<RoomStatusFilter>("all");
 
-  const [selectedReservation, setSelectedReservation] = useState<ResRow | null>(null);
+  const [search, setSearch] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  const [roomFilter, setRoomFilter] = useState("all");
+  const [roomStatusFilter, setRoomStatusFilter] = useState("all");
+  const [reservationStatusFilter, setReservationStatusFilter] = useState("all");
+
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
 
   const profiles = useProfiles();
 
@@ -281,144 +242,330 @@ export function Schedule({ res }: { res: ResRow[] }) {
   const closingMinutes = toMinutes(closingTime);
 
   const today = getLocalDateString(new Date());
+  const normalizedSearch = search.trim().toLowerCase();
 
-  const dailyReservations = useMemo(
-    () =>
-      res
-        .filter((reservation) => reservation.booking_date === date)
-        .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time)),
-    [res, date],
-  );
+  function openReservationInBookings(reservation: ResRow) {
+    sessionStorage.setItem(SELECTED_RESERVATION_KEY, reservation.id);
 
-  const visibleRooms = useMemo(() => {
-    return rooms.filter((room) => {
-      if (roomFilter !== "all" && room.id !== roomFilter) {
-        return false;
-      }
-
-      if (roomStatusFilter === "all") return true;
-
-      const statuses = getRoomStatus(room, res, date);
-
-      return statuses.includes(roomStatusFilter);
+    navigate({
+      to: "/admin",
+      search: { section: "bookings" },
     });
-  }, [rooms, roomFilter, roomStatusFilter, res, date]);
 
-  const visibleDailyReservations = useMemo(
-    () =>
-      dailyReservations.filter((reservation) =>
-        visibleRooms.some((room) => room.id === reservation.room_id),
-      ),
-    [dailyReservations, visibleRooms],
-  );
+    window.dispatchEvent(
+      new CustomEvent("afterglow:show-reservation", {
+        detail: {
+          reservationId: reservation.id,
+        },
+      }),
+    );
+  }
+
+  function resetPage() {
+    setPage(1);
+  }
 
   const weekDates = useMemo(() => getWeekDates(date), [date]);
 
   const monthDates = useMemo(() => getMonthDates(date), [date]);
 
-  const totalReservations = visibleDailyReservations.length;
+  const filteredRooms = useMemo(() => {
+    return rooms.filter((room) => {
+      if (roomFilter !== "all" && room.id !== roomFilter) {
+        return false;
+      }
 
-  const approvedCount = visibleDailyReservations.filter(
-    (reservation) => getReservationStatus(reservation) === "approved",
-  ).length;
+      if (roomStatusFilter !== "all") {
+        const roomStatus = getRoomStatus(room, res, date);
 
-  const occupiedCount = visibleDailyReservations.filter(
-    (reservation) => getReservationStatus(reservation) === "checked_in",
-  ).length;
+        if (roomStatus !== roomStatusFilter) {
+          return false;
+        }
+      }
+
+      if (normalizedSearch) {
+        const roomText = [room.name, room.room_number, room.room_type, room.type]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        const hasRoomMatch = roomText.includes(normalizedSearch);
+
+        const hasReservationMatch = res.some((reservation) => {
+          if (reservation.room_id !== room.id) {
+            return false;
+          }
+
+          const customer = getCustomerName(reservation, profiles);
+
+          return [reservation.reference_code, customer]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(normalizedSearch));
+        });
+
+        if (!hasRoomMatch && !hasReservationMatch) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [rooms, res, date, roomFilter, roomStatusFilter, normalizedSearch, profiles]);
+
+  const filteredReservations = useMemo(() => {
+    return res.filter((reservation) => {
+      const status = getScheduleReservationStatus(reservation);
+
+      if (!status) return false;
+
+      if (roomFilter !== "all" && reservation.room_id !== roomFilter) {
+        return false;
+      }
+
+      if (reservationStatusFilter !== "all" && status !== reservationStatusFilter) {
+        return false;
+      }
+
+      const room = rooms.find((item) => item.id === reservation.room_id);
+
+      if (roomStatusFilter !== "all") {
+        if (!room) return false;
+
+        const roomStatus = getRoomStatus(room, res, reservation.booking_date);
+
+        if (roomStatus !== roomStatusFilter) {
+          return false;
+        }
+      }
+
+      if (normalizedSearch) {
+        const customer = getCustomerName(reservation, profiles);
+
+        const roomName = room?.name || reservation.rooms?.name || "";
+
+        const searchableText = [
+          reservation.reference_code,
+          customer,
+          roomName,
+          reservation.booking_date,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        if (!searchableText.includes(normalizedSearch)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [
+    res,
+    rooms,
+    roomFilter,
+    roomStatusFilter,
+    reservationStatusFilter,
+    normalizedSearch,
+    profiles,
+  ]);
+
+  const dailyReservations = useMemo(() => {
+    return filteredReservations
+      .filter((reservation) => reservation.booking_date === date)
+      .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
+  }, [filteredReservations, date]);
+
+  const visibleDailyReservations = useMemo(
+    () =>
+      dailyReservations.filter((reservation) =>
+        filteredRooms.some((room) => room.id === reservation.room_id),
+      ),
+    [dailyReservations, filteredRooms],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(visibleDailyReservations.length / pageSize));
+
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedReservations = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+
+    return visibleDailyReservations.slice(start, start + pageSize);
+  }, [visibleDailyReservations, currentPage, pageSize]);
 
   function navigatePrevious() {
-    if (view === "daily") setDate((current) => addDays(current, -1));
-    if (view === "weekly") setDate((current) => addDays(current, -7));
-    if (view === "monthly") setDate((current) => addMonths(current, -1));
+    if (view === "daily") {
+      setDate((current) => addDays(current, -1));
+    }
+
+    if (view === "weekly") {
+      setDate((current) => addDays(current, -7));
+    }
+
+    if (view === "monthly") {
+      setDate((current) => addMonths(current, -1));
+    }
+
+    resetPage();
   }
 
   function navigateNext() {
-    if (view === "daily") setDate((current) => addDays(current, 1));
-    if (view === "weekly") setDate((current) => addDays(current, 7));
-    if (view === "monthly") setDate((current) => addMonths(current, 1));
+    if (view === "daily") {
+      setDate((current) => addDays(current, 1));
+    }
+
+    if (view === "weekly") {
+      setDate((current) => addDays(current, 7));
+    }
+
+    if (view === "monthly") {
+      setDate((current) => addMonths(current, 1));
+    }
+
+    resetPage();
   }
 
   function getDateHeading() {
-    if (view === "monthly") return formatMonth(date);
+    if (view === "monthly") {
+      return formatMonth(date);
+    }
 
     if (view === "weekly") {
-      const first = weekDates[0];
-      const last = weekDates[6];
-
-      return `${fmtDate(first)} – ${fmtDate(last)}`;
+      return `${fmtDate(weekDates[0])} – ${fmtDate(weekDates[6])}`;
     }
 
     return formatDay(date);
   }
 
   function getReservationsForDate(selectedDate: string) {
-    return res
-      .filter(
-        (reservation) =>
-          reservation.booking_date === selectedDate &&
-          (roomFilter === "all" || reservation.room_id === roomFilter),
-      )
-      .filter((reservation) => {
-        if (roomStatusFilter === "all") return true;
+    return filteredReservations
+      .filter((reservation) => reservation.booking_date === selectedDate)
+      .filter((reservation) => filteredRooms.some((room) => room.id === reservation.room_id))
+      .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
+  }
 
-        const room = rooms.find((item) => item.id === reservation.room_id);
+  const activeFilterCount = [
+    roomFilter !== "all",
+    roomStatusFilter !== "all",
+    reservationStatusFilter !== "all",
+  ].filter(Boolean).length;
 
-        if (!room) return false;
-
-        return getRoomStatus(room, res, selectedDate).includes(roomStatusFilter);
-      });
+  function clearFilters() {
+    setRoomFilter("all");
+    setRoomStatusFilter("all");
+    setReservationStatusFilter("all");
+    resetPage();
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Room Schedule"
-        description="View room availability and reservations across your karaoke rooms."
-      />
+    <div className="mt-4 space-y-4">
+      <div>
+        <h2 className="font-display text-xl font-bold">Room Schedule</h2>
 
-      {/* View controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-xl border border-border bg-card p-1">
-          {(
-            [
-              ["daily", "Daily"],
-              ["weekly", "Weekly"],
-              ["monthly", "Monthly"],
-            ] as const
-          ).map(([value, label]) => (
-            <Button
-              key={value}
-              size="sm"
-              variant={view === value ? "default" : "ghost"}
-              onClick={() => setView(value)}
-              className="gap-2"
+        <p className="mt-1 text-sm text-muted-foreground">
+          Manage room availability and view scheduled reservations by day, week, or month.
+        </p>
+      </div>
+
+      {/* Schedule toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+
+          <Input
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              resetPage();
+            }}
+            placeholder="Search room, customer, or reservation ID..."
+            className="pl-9"
+          />
+
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                resetPage();
+              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
             >
-              {value === "daily" && <Clock className="h-4 w-4" />}
-              {value === "weekly" && <CalendarCheck className="h-4 w-4" />}
-              {value === "monthly" && <CalendarDays className="h-4 w-4" />}
-              {label}
-            </Button>
-          ))}
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
-        <Button variant="outline" size="sm" onClick={() => setDate(today)}>
-          Today
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setFilterOpen(true)} className="gap-2">
+            <Filter className="h-4 w-4" />
+            Filter
+            {activeFilterCount > 0 && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-xs text-primary-foreground">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
+
+          <div className="inline-flex rounded-lg border border-border bg-background p-1">
+            {(
+              [
+                ["daily", "Daily", Clock],
+                ["weekly", "Weekly", CalendarCheck],
+                ["monthly", "Monthly", CalendarDays],
+              ] as const
+            ).map(([value, label, Icon]) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={view === value ? "default" : "ghost"}
+                onClick={() => {
+                  setView(value);
+                  resetPage();
+                }}
+                className="gap-1.5"
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </Button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Date navigation */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={navigatePrevious}
-          aria-label="Previous period"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={navigatePrevious}
+            aria-label="Previous period"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
 
-        <div className="text-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setDate(today);
+              resetPage();
+            }}
+          >
+            Today
+          </Button>
+
+          <Button variant="outline" size="icon" onClick={navigateNext} aria-label="Next period">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="text-right">
           <h2 className="font-semibold">{getDateHeading()}</h2>
+
           <p className="text-xs text-muted-foreground">
             {view === "daily"
               ? "Daily room schedule"
@@ -427,95 +574,103 @@ export function Schedule({ res }: { res: ResRow[] }) {
                 : "Monthly room schedule"}
           </p>
         </div>
-
-        <Button variant="outline" size="icon" onClick={navigateNext} aria-label="Next period">
-          <ChevronRight className="h-4 w-4" />
-        </Button>
       </div>
 
-      {/* Filters */}
-      <div className="grid gap-4 rounded-xl border border-border bg-card p-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="schedule-room-filter">Filter by room</Label>
-          <select
-            id="schedule-room-filter"
-            value={roomFilter}
-            onChange={(event) => setRoomFilter(event.target.value)}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="all">All rooms</option>
-            {rooms.map((room) => (
-              <option key={room.id} value={room.id}>
-                {room.name}
-                {room.room_number ? ` (${room.room_number})` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Filter modal */}
+      <Dialog open={filterOpen} onOpenChange={setFilterOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Schedule Filters</DialogTitle>
+          </DialogHeader>
 
-        <div className="space-y-2">
-          <Label htmlFor="schedule-room-status">Filter by room status</Label>
-          <select
-            id="schedule-room-status"
-            value={roomStatusFilter}
-            onChange={(event) => setRoomStatusFilter(event.target.value as RoomStatusFilter)}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-          >
-            {ROOM_STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.dot ? "● " : ""}
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="schedule-room-filter">Room</Label>
 
-      {/* Summary */}
-      {view === "daily" && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <SummaryCard
-            label="Total Rooms"
-            value={visibleRooms.length}
-            icon={<LayoutGrid className="h-4 w-4" />}
-          />
-          <SummaryCard
-            label="Reservations"
-            value={totalReservations}
-            icon={<CalendarDays className="h-4 w-4" />}
-          />
-          <SummaryCard
-            label="Reserved"
-            value={approvedCount}
-            icon={<CalendarCheck className="h-4 w-4" />}
-          />
-          <SummaryCard
-            label="Occupied"
-            value={occupiedCount}
-            icon={<Users className="h-4 w-4" />}
-          />
-        </div>
-      )}
+              <select
+                id="schedule-room-filter"
+                value={roomFilter}
+                onChange={(event) => {
+                  setRoomFilter(event.target.value);
+                  resetPage();
+                }}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="all">All rooms</option>
 
-      {/* Room status legend */}
-      <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl border border-border bg-card p-4 text-sm">
-        {ROOM_STATUS_OPTIONS.filter((option) => option.value !== "all").map((option) => (
-          <div key={option.value} className="flex items-center gap-2">
-            <span className={`h-2.5 w-2.5 rounded-full ${option.dot}`} />
-            <span>{option.label}</span>
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.name}
+                    {room.room_number ? ` (${room.room_number})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="schedule-room-status">Room Operational Status</Label>
+
+              <select
+                id="schedule-room-status"
+                value={roomStatusFilter}
+                onChange={(event) => {
+                  setRoomStatusFilter(event.target.value);
+                  resetPage();
+                }}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="all">All room statuses</option>
+                <option value="available">Available</option>
+                <option value="full">Full</option>
+                <option value="occupied">Occupied</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="schedule-reservation-status">Reservation Status</Label>
+
+              <select
+                id="schedule-reservation-status"
+                value={reservationStatusFilter}
+                onChange={(event) => {
+                  setReservationStatusFilter(event.target.value);
+                  resetPage();
+                }}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="all">All reservation statuses</option>
+
+                {RESERVATION_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status.replace("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-between gap-2 border-t border-border pt-4">
+              <Button variant="ghost" onClick={clearFilters}>
+                Clear all
+              </Button>
+
+              <Button onClick={() => setFilterOpen(false)}>Apply filters</Button>
+            </div>
           </div>
-        ))}
-      </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Daily view */}
       {view === "daily" && (
-        <div className="space-y-4">
-          {visibleRooms.length === 0 ? (
-            <EmptyState message="No rooms match the selected filters." />
+        <div className="space-y-6">
+          {filteredRooms.length === 0 ? (
+            <EmptyState message="No rooms match your search or selected filters." />
           ) : (
             <div className="overflow-hidden rounded-xl border border-border bg-card">
               <div className="border-b border-border p-4">
-                <h3 className="font-semibold">Daily room timeline</h3>
+                <h3 className="font-semibold">Daily Room Timeline</h3>
+
                 <p className="text-xs text-muted-foreground">
                   {formatMinutes(openingMinutes)} – {formatMinutes(closingMinutes)}
                 </p>
@@ -523,7 +678,6 @@ export function Schedule({ res }: { res: ResRow[] }) {
 
               <div className="overflow-x-auto">
                 <div className="min-w-[760px]">
-                  {/* Time labels */}
                   <div className="grid grid-cols-[180px_1fr] border-b border-border">
                     <div className="p-3 text-xs font-medium text-muted-foreground">Room</div>
 
@@ -534,6 +688,7 @@ export function Schedule({ res }: { res: ResRow[] }) {
                         },
                         (_, index) => {
                           const minute = openingMinutes + index * 60;
+
                           const position =
                             ((minute - openingMinutes) / (closingMinutes - openingMinutes)) * 100;
 
@@ -541,7 +696,9 @@ export function Schedule({ res }: { res: ResRow[] }) {
                             <div
                               key={minute}
                               className="absolute top-0 h-full border-l border-border"
-                              style={{ left: `${position}%` }}
+                              style={{
+                                left: `${position}%`,
+                              }}
                             >
                               <span className="absolute left-1 top-3 whitespace-nowrap text-[10px] text-muted-foreground">
                                 {formatMinutes(minute)}
@@ -553,13 +710,10 @@ export function Schedule({ res }: { res: ResRow[] }) {
                     </div>
                   </div>
 
-                  {/* Room rows */}
-                  {visibleRooms.map((room) => {
+                  {filteredRooms.map((room) => {
                     const roomReservations = visibleDailyReservations.filter(
                       (reservation) => reservation.room_id === room.id,
                     );
-
-                    const statuses = getRoomStatus(room, res, date);
 
                     return (
                       <div
@@ -568,22 +722,12 @@ export function Schedule({ res }: { res: ResRow[] }) {
                       >
                         <div className="flex flex-col justify-center gap-1 p-3">
                           <span className="text-sm font-medium">{room.name}</span>
+
                           {room.room_number && (
                             <span className="text-xs text-muted-foreground">
                               {room.room_number}
                             </span>
                           )}
-
-                          <div className="flex flex-wrap gap-1">
-                            {statuses.map((status) => (
-                              <span
-                                key={status}
-                                className={`text-[10px] font-medium ${ROOM_STATUS_STYLES[status].text}`}
-                              >
-                                {ROOM_STATUS_STYLES[status].label}
-                              </span>
-                            ))}
-                          </div>
                         </div>
 
                         <div className="relative min-h-[76px]">
@@ -593,6 +737,7 @@ export function Schedule({ res }: { res: ResRow[] }) {
                             },
                             (_, index) => {
                               const minute = openingMinutes + index * 60;
+
                               const position =
                                 ((minute - openingMinutes) / (closingMinutes - openingMinutes)) *
                                 100;
@@ -601,7 +746,9 @@ export function Schedule({ res }: { res: ResRow[] }) {
                                 <div
                                   key={minute}
                                   className="absolute inset-y-0 border-l border-border/60"
-                                  style={{ left: `${position}%` }}
+                                  style={{
+                                    left: `${position}%`,
+                                  }}
                                 />
                               );
                             },
@@ -620,18 +767,20 @@ export function Schedule({ res }: { res: ResRow[] }) {
                               closingMinutes,
                             );
 
-                            if (position.width <= 0) return null;
+                            if (position.width <= 0) {
+                              return null;
+                            }
 
-                            const status = getReservationStatus(reservation);
+                            const status = getScheduleReservationStatus(reservation);
+
+                            if (!status) return null;
 
                             return (
                               <button
                                 key={reservation.id}
                                 type="button"
-                                onClick={() => setSelectedReservation(reservation)}
-                                className={`absolute top-2 z-10 flex h-[58px] flex-col justify-center overflow-hidden rounded-md border-l-4 px-2 text-left text-xs transition hover:brightness-95 ${
-                                  RESERVATION_COLORS[status] || "border-l-muted-foreground bg-muted"
-                                }`}
+                                onClick={() => openReservationInBookings(reservation)}
+                                className={`absolute top-2 z-10 flex h-[58px] flex-col justify-center overflow-hidden rounded-md border-l-4 px-2 text-left text-xs transition hover:brightness-95 ${RESERVATION_COLORS[status]}`}
                                 style={{
                                   left: `${position.left}%`,
                                   width: `${position.width}%`,
@@ -644,6 +793,7 @@ export function Schedule({ res }: { res: ResRow[] }) {
                                 <span className="truncate font-semibold">
                                   {reservation.reference_code}
                                 </span>
+
                                 <span className="truncate text-[10px] text-muted-foreground">
                                   {fmtTime(reservation.start_time)} –{" "}
                                   {fmtTime(reservation.end_time)}
@@ -668,21 +818,63 @@ export function Schedule({ res }: { res: ResRow[] }) {
             </div>
           )}
 
-          {/* Reservation list */}
-          <div className="space-y-3">
-            <h3 className="font-semibold">Reservations for this day</h3>
+          {/* Scheduled reservations */}
+          <div className="space-y-4">
+            <div>
+              <h3 className="font-semibold">Scheduled Reservations</h3>
+
+              <p className="text-sm text-muted-foreground">
+                Reservations scheduled for {fmtDate(date)}.
+              </p>
+            </div>
 
             {visibleDailyReservations.length === 0 ? (
-              <EmptyState message="No reservations for this date." />
+              <EmptyState message="No reservations match your search or selected filters for this date." />
             ) : (
-              visibleDailyReservations.map((reservation) => (
-                <ReservationCard
-                  key={reservation.id}
-                  reservation={reservation}
-                  customerName={getCustomerName(reservation, profiles)}
-                  onClick={() => setSelectedReservation(reservation)}
-                />
-              ))
+              <div className="space-y-3">
+                {paginatedReservations.map((reservation) => (
+                  <ReservationCard
+                    key={reservation.id}
+                    reservation={reservation}
+                    customerName={getCustomerName(reservation, profiles)}
+                    onClick={() => openReservationInBookings(reservation)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {visibleDailyReservations.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  Showing {(currentPage - 1) * pageSize + 1}–
+                  {Math.min(currentPage * pageSize, visibleDailyReservations.length)} of{" "}
+                  {visibleDailyReservations.length} reservations
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  >
+                    Previous
+                  </Button>
+
+                  <span className="text-xs text-muted-foreground">
+                    Page {currentPage} of {totalPages}
+                  </span>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -692,9 +884,7 @@ export function Schedule({ res }: { res: ResRow[] }) {
       {view === "weekly" && (
         <div className="space-y-3">
           {weekDates.map((weekDate) => {
-            const dayReservations = getReservationsForDate(weekDate).sort(
-              (a, b) => toMinutes(a.start_time) - toMinutes(b.start_time),
-            );
+            const dayReservations = getReservationsForDate(weekDate);
 
             return (
               <div
@@ -703,16 +893,19 @@ export function Schedule({ res }: { res: ResRow[] }) {
                   sameDate(weekDate, today) ? "border-primary/50" : ""
                 }`}
               >
+                {/* Only the date header has a hover effect */}
                 <button
                   type="button"
                   onClick={() => {
                     setDate(weekDate);
                     setView("daily");
+                    resetPage();
                   }}
                   className="flex w-full items-center justify-between gap-3 border-b border-border p-4 text-left hover:bg-muted/40"
                 >
                   <div>
                     <p className="font-medium">{formatDay(weekDate)}</p>
+
                     <p className="text-xs text-muted-foreground">
                       {dayReservations.length} reservation
                       {dayReservations.length !== 1 ? "s" : ""}
@@ -726,24 +919,31 @@ export function Schedule({ res }: { res: ResRow[] }) {
                   <p className="p-4 text-sm text-muted-foreground">No reservations</p>
                 ) : (
                   <div className="divide-y divide-border">
-                    {dayReservations.map((reservation) => (
-                      <button
-                        key={reservation.id}
-                        type="button"
-                        onClick={() => setSelectedReservation(reservation)}
-                        className="flex w-full flex-wrap items-center justify-between gap-3 p-4 text-left hover:bg-muted/40"
-                      >
-                        <div>
-                          <p className="text-sm font-medium">{reservation.rooms?.name || "Room"}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {reservation.reference_code} · {fmtTime(reservation.start_time)} –{" "}
-                            {fmtTime(reservation.end_time)}
-                          </p>
-                        </div>
+                    {dayReservations.map((reservation) => {
+                      const status = getScheduleReservationStatus(reservation);
 
-                        <StatusBadge status={reservation.status} />
-                      </button>
-                    ))}
+                      return (
+                        <button
+                          key={reservation.id}
+                          type="button"
+                          onClick={() => openReservationInBookings(reservation)}
+                          className="flex w-full flex-wrap items-center justify-between gap-3 p-4 text-left"
+                        >
+                          <div>
+                            <p className="text-sm font-medium">
+                              {reservation.rooms?.name || "Room"}
+                            </p>
+
+                            <p className="text-xs text-muted-foreground">
+                              {reservation.reference_code} · {fmtTime(reservation.start_time)} –{" "}
+                              {fmtTime(reservation.end_time)}
+                            </p>
+                          </div>
+
+                          {status && <StatusBadge status={status} />}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -771,6 +971,7 @@ export function Schedule({ res }: { res: ResRow[] }) {
               const dayReservations = getReservationsForDate(monthDate);
 
               const isToday = sameDate(monthDate, today);
+
               const isSelected = sameDate(monthDate, date);
 
               return (
@@ -780,6 +981,7 @@ export function Schedule({ res }: { res: ResRow[] }) {
                   onClick={() => {
                     setDate(monthDate);
                     setView("daily");
+                    resetPage();
                   }}
                   className={`relative flex min-h-[90px] flex-col items-start gap-1 border-b border-r border-border p-2 text-left transition hover:bg-muted/50 sm:min-h-[120px] sm:p-3 ${
                     !currentMonth ? "opacity-40" : ""
@@ -796,18 +998,27 @@ export function Schedule({ res }: { res: ResRow[] }) {
                   {dayReservations.length > 0 && (
                     <div className="mt-1 space-y-1">
                       <div className="flex flex-wrap gap-0.5">
-                        {dayReservations.slice(0, 5).map((reservation) => (
-                          <span
-                            key={reservation.id}
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              getReservationStatus(reservation) === "checked_in"
-                                ? "bg-blue-500"
-                                : getReservationStatus(reservation) === "approved"
-                                  ? "bg-yellow-500"
-                                  : "bg-amber-500"
-                            }`}
-                          />
-                        ))}
+                        {dayReservations.slice(0, 5).map((reservation) => {
+                          const status = getScheduleReservationStatus(reservation);
+
+                          if (!status) return null;
+
+                          const dotColor =
+                            status === "approved"
+                              ? "bg-yellow-500"
+                              : status === "rejected"
+                                ? "bg-red-500"
+                                : status === "cancelled"
+                                  ? "bg-muted-foreground"
+                                  : "bg-amber-500";
+
+                          return (
+                            <span
+                              key={reservation.id}
+                              className={`h-1.5 w-1.5 rounded-full ${dotColor}`}
+                            />
+                          );
+                        })}
                       </div>
 
                       <span className="text-[10px] text-muted-foreground sm:text-xs">
@@ -822,102 +1033,6 @@ export function Schedule({ res }: { res: ResRow[] }) {
           </div>
         </div>
       )}
-
-      {/* Reservation details dialog */}
-      <Dialog
-        open={!!selectedReservation}
-        onOpenChange={(open) => {
-          if (!open) setSelectedReservation(null);
-        }}
-      >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-          {selectedReservation && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Reservation Details</DialogTitle>
-              </DialogHeader>
-
-              <div className="space-y-4">
-                <div className="rounded-xl border border-border bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground">Reference Code</p>
-                  <p className="font-semibold">{selectedReservation.reference_code}</p>
-                </div>
-
-                <DetailRow
-                  label="Customer"
-                  value={getCustomerName(selectedReservation, profiles)}
-                />
-
-                <DetailRow label="Room" value={selectedReservation.rooms?.name || "Room"} />
-
-                <DetailRow label="Date" value={fmtDate(selectedReservation.booking_date)} />
-
-                <DetailRow
-                  label="Time"
-                  value={`${fmtTime(selectedReservation.start_time)} – ${fmtTime(
-                    selectedReservation.end_time,
-                  )}`}
-                />
-
-                <DetailRow label="Guests" value={`${selectedReservation.guest_count}`} />
-
-                <DetailRow label="Room Total" value={peso(selectedReservation.room_total)} />
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge status={selectedReservation.status} />
-                  <StatusBadge status={selectedReservation.payment_status} />
-                  <PaymentMethodBadge method={selectedReservation.payment_method} />
-                </div>
-
-                {selectedReservation.payer_name && (
-                  <DetailRow label="Payer Name" value={selectedReservation.payer_name} />
-                )}
-
-                {selectedReservation.payment_reference && (
-                  <DetailRow
-                    label="Payment Reference"
-                    value={selectedReservation.payment_reference}
-                  />
-                )}
-
-                {selectedReservation.special_requests && (
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Special Requests</p>
-                    <p className="text-sm">{selectedReservation.special_requests}</p>
-                  </div>
-                )}
-
-                {selectedReservation.rejection_reason && (
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Rejection Reason</p>
-                    <p className="text-sm">{selectedReservation.rejection_reason}</p>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: number;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <span className="text-muted-foreground">{icon}</span>
-      </div>
-      <p className="mt-2 text-2xl font-semibold">{value}</p>
     </div>
   );
 }
@@ -931,6 +1046,8 @@ function ReservationCard({
   customerName: string;
   onClick: () => void;
 }) {
+  const status = getScheduleReservationStatus(reservation);
+
   return (
     <button
       type="button"
@@ -942,26 +1059,14 @@ function ReservationCard({
           {reservation.rooms?.name || "Room"} · {fmtTime(reservation.start_time)} –{" "}
           {fmtTime(reservation.end_time)}
         </p>
+
         <p className="text-xs text-muted-foreground">
           {reservation.reference_code} · {customerName} · {reservation.guest_count} guests
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge status={reservation.status} />
-        <StatusBadge status={reservation.payment_status} />
-        <PaymentMethodBadge method={reservation.payment_method} />
-      </div>
+      {status && <StatusBadge status={status} />}
     </button>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-4 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium">{value}</span>
-    </div>
   );
 }
 

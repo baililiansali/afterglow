@@ -1,59 +1,88 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { PageHeader } from "@/components/SiteChrome";
-import { StatusBadge, PaymentMethodBadge } from "@/components/StatusBadge";
+import { Filter, Search, Pencil, Trash2 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { supabase } from "@/integrations/supabase/client";
-import { ROOM_IMAGES, errMsg, fmtDate, fmtTime, foodImage, peso } from "@/lib/afterglow";
 import { ImagePicker } from "@/components/ImagePicker";
-import { useAuth } from "@/lib/auth";
-import { menuQuery, roomsQuery, settingsQuery } from "@/lib/queries";
+import { Pagination } from "@/components/Pagination";
+
+import { supabase } from "@/integrations/supabase/client";
+import { errMsg, foodImage, peso } from "@/lib/afterglow";
+import { menuQuery } from "@/lib/queries";
+
 import type { Database } from "@/integrations/supabase/types";
-import {
-  useProfiles,
-  ViewToggle,
-  NEXT,
-  ROOM_TYPES,
-  emptyRoom,
-  type ResRow,
-  type OrderRow,
-  type ResStatus,
-  type FoStatus,
-  type RoomType,
-} from "./shared";
+
+import { ViewToggle } from "./shared";
+
+type StatusFilter = "all" | "available" | "unavailable" | "featured";
 
 export function MenuAdmin() {
   const qc = useQueryClient();
   const { data } = useQuery(menuQuery);
-  const emptyItem = { name: "", price: "", category_id: "", description: "", image_url: "" };
+
+  const emptyItem = {
+    name: "",
+    price: "",
+    category_id: "",
+    description: "",
+    image_url: "",
+  };
 
   const [n, setN] = useState(emptyItem);
   const [open, setOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("all");
+
   const [view, setView] = useState<"list" | "grid">("list");
 
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const selectCls = "h-9 rounded-md border border-input bg-transparent px-3 text-sm";
+
+  const activeFilterCount = (cat ? 1 : 0) + (status !== "all" ? 1 : 0);
+
+  type Item = NonNullable<typeof data>["items"][number];
+
+  // --------------------------------------------------
+  // UPDATE MENU ITEM
+  // --------------------------------------------------
+
   const upd = async (id: string, patch: Database["public"]["Tables"]["menu_items"]["Update"]) => {
-    const { data, error } = await supabase
+    const { data: rows, error } = await supabase
       .from("menu_items")
       .update(patch)
       .eq("id", id)
       .select("id");
 
-    if (error) return void toast.error(errMsg(error));
-    if (!data?.length) return void toast.error("Update was not saved.");
+    if (error) {
+      toast.error(errMsg(error));
+      return;
+    }
 
-    qc.invalidateQueries({ queryKey: ["menu"] });
+    if (!rows?.length) {
+      toast.error("Update was not saved.");
+      return;
+    }
+
+    toast.success("Item updated.");
+
+    await qc.invalidateQueries({ queryKey: ["menu"] });
   };
 
-  type Item = NonNullable<typeof data>["items"][number];
+  // --------------------------------------------------
+  // ADD MENU ITEM
+  // --------------------------------------------------
 
   const startAdd = () => {
     setEditId(null);
@@ -61,8 +90,13 @@ export function MenuAdmin() {
     setOpen(true);
   };
 
+  // --------------------------------------------------
+  // EDIT MENU ITEM
+  // --------------------------------------------------
+
   const startEdit = (i: Item) => {
     setEditId(i.id);
+
     setN({
       name: i.name,
       price: String(i.price),
@@ -70,17 +104,29 @@ export function MenuAdmin() {
       description: i.description ?? "",
       image_url: i.image_url ?? "",
     });
+
     setOpen(true);
   };
 
-  const add = async (e: React.FormEvent) => {
+  // --------------------------------------------------
+  // SAVE MENU ITEM
+  // --------------------------------------------------
+
+  const add = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    const price = Number(n.price);
+
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error("Please enter a valid price.");
+      return;
+    }
 
     const payload = {
       name: n.name.trim(),
-      price: Number(n.price),
+      price,
       category_id: n.category_id,
-      description: n.description || null,
+      description: n.description.trim() || null,
       image_url: n.image_url || null,
     };
 
@@ -88,17 +134,28 @@ export function MenuAdmin() {
       ? await supabase.from("menu_items").update(payload).eq("id", editId).select("id")
       : await supabase.from("menu_items").insert(payload).select("id");
 
-    if (error) return void toast.error(errMsg(error));
-    if (!rows?.length) return void toast.error("Item was not saved.");
+    if (error) {
+      toast.error(errMsg(error));
+      return;
+    }
 
-    toast.success(editId ? "Item updated" : "Item added");
+    if (!rows?.length) {
+      toast.error("Item was not saved.");
+      return;
+    }
+
+    toast.success(editId ? "Item updated." : "Item added.");
 
     setN(emptyItem);
     setEditId(null);
     setOpen(false);
 
-    qc.invalidateQueries({ queryKey: ["menu"] });
+    await qc.invalidateQueries({ queryKey: ["menu"] });
   };
+
+  // --------------------------------------------------
+  // DELETE MENU ITEM
+  // --------------------------------------------------
 
   const del = async (i: Item) => {
     if (!confirm(`Delete "${i.name}"? This cannot be undone.`)) return;
@@ -109,94 +166,343 @@ export function MenuAdmin() {
       .eq("id", i.id)
       .select("id");
 
-    if (error)
-      return void toast.error(
+    if (error) {
+      toast.error(
         error.code === "23503"
           ? "This item appears in past orders and can't be deleted. Switch Available off instead."
           : errMsg(error),
       );
+      return;
+    }
 
-    if (!rows?.length) return void toast.error("Item was not deleted.");
+    if (!rows?.length) {
+      toast.error("Item was not deleted.");
+      return;
+    }
 
-    toast.success("Item deleted");
-    qc.invalidateQueries({ queryKey: ["menu"] });
+    toast.success("Item deleted.");
+
+    await qc.invalidateQueries({ queryKey: ["menu"] });
   };
 
+  // --------------------------------------------------
+  // SEARCH AND FILTER
+  // --------------------------------------------------
+
   const catName = (id: string) => data?.categories.find((c) => c.id === id)?.name;
+
   const term = q.trim().toLowerCase();
 
-  const items = (data?.items ?? []).filter(
-    (i) =>
-      (!cat || i.category_id === cat) &&
-      (!term ||
-        i.name.toLowerCase().includes(term) ||
-        (i.description ?? "").toLowerCase().includes(term)),
+  const items = useMemo(
+    () =>
+      (data?.items ?? []).filter((i) => {
+        const matchesCategory = !cat || i.category_id === cat;
+
+        const matchesSearch =
+          !term ||
+          i.name.toLowerCase().includes(term) ||
+          (i.description ?? "").toLowerCase().includes(term);
+
+        const matchesStatus =
+          status === "all" ||
+          (status === "available" && i.is_available) ||
+          (status === "unavailable" && !i.is_available) ||
+          (status === "featured" && i.is_featured);
+
+        return matchesCategory && matchesSearch && matchesStatus;
+      }),
+    [data?.items, cat, term, status],
   );
 
-  const selectCls = "h-9 rounded-md border border-input bg-transparent px-3 text-sm";
+  useEffect(() => {
+    setPage(1);
+  }, [q, cat, status]);
+
+  // --------------------------------------------------
+  // PAGINATION
+  // --------------------------------------------------
+
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [items, currentPage, pageSize]);
+
+  const clearFilters = () => {
+    setCat("");
+    setStatus("all");
+  };
+
+  // --------------------------------------------------
+  // RENDER
+  // --------------------------------------------------
 
   return (
-    <div className="mt-4 space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <Input
-          placeholder="Search menu…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="max-w-xs"
-        />
+    <div className="mt-4 space-y-4">
+      {/* PAGE HEADING */}
+      <div>
+        <h2 className="font-display text-xl font-bold">Food &amp; Beverages</h2>
 
-        <select
-          aria-label="Filter by category"
-          className={selectCls}
-          value={cat}
-          onChange={(e) => setCat(e.target.value)}
-        >
-          <option value="" className="bg-popover">
-            All categories
-          </option>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Manage your food and beverage menu, prices, availability, and featured items.
+        </p>
+      </div>
 
-          {data?.categories.map((c) => (
-            <option key={c.id} value={c.id} className="bg-popover">
-              {c.name}
-            </option>
-          ))}
-        </select>
+      {/* TOOLBAR */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          {/* SEARCH */}
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 
-        <ViewToggle view={view} setView={setView} />
+            <Input
+              placeholder="Search food and beverages..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="pl-9"
+            />
+          </div>
 
-        <Button onClick={startAdd}>Add item</Button>
+          {/* FILTER */}
+          <Button variant="outline" onClick={() => setFilterOpen(true)}>
+            <Filter className="mr-2 h-4 w-4" />
+            Filter
+            {activeFilterCount > 0 && (
+              <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
+        </div>
 
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{editId ? "Edit menu item" : "New menu item"}</DialogTitle>
-            </DialogHeader>
+        {/* VIEW TOGGLE AND ADD ITEM */}
+        <div className="flex flex-wrap items-center gap-2">
+          <ViewToggle view={view} setView={setView} />
+          <Button onClick={startAdd}>Add item</Button>
+        </div>
+      </div>
 
-            <form onSubmit={add} className="grid gap-3">
-              <Input
-                required
-                placeholder="Item name"
-                value={n.name}
-                onChange={(e) => setN({ ...n, name: e.target.value })}
-              />
+      {/* GRID VIEW */}
+      {view === "grid" && (
+        <>
+          {items.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+              No items match your filters.
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {paginatedItems.map((i) => (
+                <div key={i.id} className="overflow-hidden rounded-xl border border-border bg-card">
+                  <img
+                    src={i.image_url || foodImage(i.image_key)}
+                    alt={i.name}
+                    className="aspect-[16/10] w-full object-cover"
+                    loading="lazy"
+                  />
 
-              <Input
-                required
-                type="number"
-                min={0}
-                placeholder="Price"
-                value={n.price}
-                onChange={(e) => setN({ ...n, price: e.target.value })}
-              />
+                  <div className="space-y-3 p-4">
+                    <div>
+                      <p className="font-medium">{i.name}</p>
+
+                      {i.description && (
+                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                          {i.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      {catName(i.category_id)} · {peso(i.price)}
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-4 text-xs">
+                      <label className="flex items-center gap-2">
+                        <Switch
+                          checked={i.is_available}
+                          onCheckedChange={(v) => upd(i.id, { is_available: v })}
+                        />
+                        Availability
+                      </label>
+
+                      <label className="flex items-center gap-2">
+                        <Switch
+                          checked={i.is_featured}
+                          onCheckedChange={(v) => upd(i.id, { is_featured: v })}
+                        />
+                        Featured
+                      </label>
+                    </div>
+
+                    {/* GRID ACTIONS */}
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => startEdit(i)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Edit
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => del(i)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* LIST VIEW */}
+      {view === "list" && (
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full whitespace-nowrap text-sm">
+            <thead className="bg-secondary/50 text-left text-muted-foreground">
+              <tr>
+                <th className="p-3">Item</th>
+                <th className="p-3">Category</th>
+                <th className="p-3">Price</th>
+                <th className="p-3">Availability</th>
+                <th className="p-3">Featured</th>
+                <th className="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {items.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="p-4 text-center text-muted-foreground">
+                    No items match your filters.
+                  </td>
+                </tr>
+              ) : (
+                paginatedItems.map((i) => (
+                  <tr key={i.id} className="border-t border-border">
+                    <td className="p-3">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={i.image_url || foodImage(i.image_key)}
+                          alt=""
+                          className="h-10 w-10 rounded object-cover"
+                          loading="lazy"
+                        />
+
+                        <div className="min-w-0">
+                          <p className="font-medium">{i.name}</p>
+
+                          {i.description && (
+                            <p className="mt-1 line-clamp-2 max-w-xs text-xs text-muted-foreground">
+                              {i.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="p-3">{catName(i.category_id)}</td>
+
+                    <td className="p-3">
+                      <Input
+                        key={`${i.id}-${i.price}`}
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        className="h-8 w-24"
+                        defaultValue={i.price}
+                        onBlur={(e) => {
+                          const value = Number(e.target.value);
+
+                          if (Number.isFinite(value) && value >= 0 && value !== Number(i.price)) {
+                            void upd(i.id, { price: value });
+                          }
+                        }}
+                      />
+                    </td>
+
+                    <td className="p-3">
+                      <Switch
+                        checked={i.is_available}
+                        onCheckedChange={(v) => upd(i.id, { is_available: v })}
+                      />
+                    </td>
+
+                    <td className="p-3">
+                      <Switch
+                        checked={i.is_featured}
+                        onCheckedChange={(v) => upd(i.id, { is_featured: v })}
+                      />
+                    </td>
+
+                    {/* LIST ACTIONS */}
+                    <td className="p-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => startEdit(i)}
+                          aria-label={`Edit ${i.name}`}
+                          title="Edit"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => del(i)}
+                          aria-label={`Delete ${i.name}`}
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* PAGINATION */}
+      <Pagination
+        page={currentPage}
+        pageSize={pageSize}
+        totalItems={items.length}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        itemLabel="items"
+      />
+
+      {/* FILTER DIALOG */}
+      <Dialog open={filterOpen} onOpenChange={setFilterOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Menu filters</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* CATEGORY FILTER */}
+            <div>
+              <Label htmlFor="menu-category-filter">Category</Label>
 
               <select
-                required
-                className={selectCls}
-                value={n.category_id}
-                onChange={(e) => setN({ ...n, category_id: e.target.value })}
+                id="menu-category-filter"
+                className={selectCls + " mt-1 block w-full"}
+                value={cat}
+                onChange={(e) => setCat(e.target.value)}
               >
                 <option value="" className="bg-popover">
-                  Category…
+                  All categories
                 </option>
 
                 {data?.categories.map((c) => (
@@ -205,180 +511,103 @@ export function MenuAdmin() {
                   </option>
                 ))}
               </select>
-
-              <Textarea
-                placeholder="Description"
-                value={n.description}
-                onChange={(e) => setN({ ...n, description: e.target.value })}
-              />
-
-              <ImagePicker value={n.image_url} onChange={(v) => setN({ ...n, image_url: v })} />
-
-              <Button type="submit">{editId ? "Save changes" : "Save item"}</Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {view === "grid" ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.length === 0 && <p className="text-muted-foreground">No items match.</p>}
-
-          {items.map((i) => (
-            <div key={i.id} className="overflow-hidden rounded-xl border border-border bg-card">
-              <img
-                src={i.image_url || foodImage(i.image_key)}
-                alt={i.name}
-                className="aspect-[16/10] w-full object-cover"
-                loading="lazy"
-              />
-
-              <div className="space-y-3 p-4">
-                <div>
-                  <p className="font-medium">{i.name}</p>
-
-                  {i.description && (
-                    <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                      {i.description}
-                    </p>
-                  )}
-                </div>
-
-                <p className="text-xs text-muted-foreground">
-                  {catName(i.category_id)} · {peso(i.price)}
-                </p>
-
-                <div className="flex flex-wrap items-center gap-4 text-xs">
-                  <label className="flex items-center gap-2">
-                    <Switch
-                      checked={i.is_available}
-                      onCheckedChange={(v) => upd(i.id, { is_available: v })}
-                    />
-                    Availability
-                  </label>
-
-                  <label className="flex items-center gap-2">
-                    <Switch
-                      checked={i.is_featured}
-                      onCheckedChange={(v) => upd(i.id, { is_featured: v })}
-                    />
-                    Featured
-                  </label>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => startEdit(i)}>
-                    Edit
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive"
-                    onClick={() => del(i)}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-secondary/50 text-left text-muted-foreground">
-              <tr>
-                <th className="p-3">Item</th>
-                <th>Category</th>
-                <th>Price</th>
-                <th>Availability</th>
-                <th>Featured</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
 
-            <tbody>
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="p-3 text-muted-foreground">
-                    No items match.
-                  </td>
-                </tr>
-              )}
+            {/* STATUS FILTER */}
+            <div>
+              <Label htmlFor="menu-status-filter">Status</Label>
 
-              {items.map((i) => (
-                <tr key={i.id} className="border-t border-border">
-                  <td className="p-3">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={i.image_url || foodImage(i.image_key)}
-                        alt=""
-                        className="h-10 w-10 rounded object-cover"
-                        loading="lazy"
-                      />
+              <select
+                id="menu-status-filter"
+                className={selectCls + " mt-1 block w-full"}
+                value={status}
+                onChange={(e) => setStatus(e.target.value as StatusFilter)}
+              >
+                <option value="all" className="bg-popover">
+                  All
+                </option>
 
-                      <div className="min-w-0">
-                        <p className="font-medium">{i.name}</p>
+                <option value="available" className="bg-popover">
+                  Available
+                </option>
 
-                        {i.description && (
-                          <p className="mt-1 max-w-xs text-xs text-muted-foreground line-clamp-2">
-                            {i.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </td>
+                <option value="unavailable" className="bg-popover">
+                  Unavailable
+                </option>
 
-                  <td>{catName(i.category_id)}</td>
+                <option value="featured" className="bg-popover">
+                  Featured
+                </option>
+              </select>
+            </div>
 
-                  <td>
-                    <Input
-                      key={String(i.price)}
-                      type="number"
-                      className="h-8 w-24"
-                      defaultValue={i.price}
-                      onBlur={(e) =>
-                        Number(e.target.value) !== Number(i.price) &&
-                        upd(i.id, { price: Number(e.target.value) })
-                      }
-                    />
-                  </td>
+            {/* FILTER ACTIONS */}
+            <div className="flex justify-between gap-2 border-t border-border pt-4">
+              <Button variant="ghost" onClick={clearFilters}>
+                Clear all
+              </Button>
 
-                  <td>
-                    <Switch
-                      checked={i.is_available}
-                      onCheckedChange={(v) => upd(i.id, { is_available: v })}
-                    />
-                  </td>
+              <Button onClick={() => setFilterOpen(false)}>Apply filters</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
-                  <td>
-                    <Switch
-                      checked={i.is_featured}
-                      onCheckedChange={(v) => upd(i.id, { is_featured: v })}
-                    />
-                  </td>
+      {/* ADD / EDIT ITEM DIALOG */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editId ? "Edit menu item" : "New menu item"}</DialogTitle>
+          </DialogHeader>
 
-                  <td className="whitespace-nowrap pr-3">
-                    <Button size="sm" variant="ghost" onClick={() => startEdit(i)}>
-                      Edit
-                    </Button>
+          <form onSubmit={add} className="grid gap-3">
+            <Input
+              required
+              placeholder="Item name"
+              value={n.name}
+              onChange={(e) => setN({ ...n, name: e.target.value })}
+            />
 
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive"
-                      onClick={() => del(i)}
-                    >
-                      Delete
-                    </Button>
-                  </td>
-                </tr>
+            <Input
+              required
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder="Price"
+              value={n.price}
+              onChange={(e) => setN({ ...n, price: e.target.value })}
+            />
+
+            <select
+              required
+              aria-label="Category"
+              className={selectCls}
+              value={n.category_id}
+              onChange={(e) => setN({ ...n, category_id: e.target.value })}
+            >
+              <option value="" className="bg-popover">
+                Category...
+              </option>
+
+              {data?.categories.map((c) => (
+                <option key={c.id} value={c.id} className="bg-popover">
+                  {c.name}
+                </option>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </select>
+
+            <Textarea
+              placeholder="Description"
+              value={n.description}
+              onChange={(e) => setN({ ...n, description: e.target.value })}
+            />
+
+            <ImagePicker value={n.image_url} onChange={(v) => setN({ ...n, image_url: v })} />
+
+            <Button type="submit">{editId ? "Save changes" : "Save item"}</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

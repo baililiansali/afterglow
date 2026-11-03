@@ -1,5 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
 import { Dashboard } from "@/components/admin/Dashboard";
@@ -32,7 +31,10 @@ export const Route = createFileRoute("/admin")({
         name: "description",
         content: "Manage Afterglow reservations, food orders, rooms and menu.",
       },
-      { property: "og:title", content: "Admin — Afterglow" },
+      {
+        property: "og:title",
+        content: "Admin — Afterglow",
+      },
       {
         property: "og:description",
         content: "Afterglow admin dashboard.",
@@ -78,17 +80,23 @@ function Admin() {
   const orders = useAdminOrders();
 
   const search = Route.useSearch();
+  const navigate = useNavigate();
 
-  const [section, setSection] = useState<SectionKey>(search.section ?? "dashboard");
+  // The URL determines the active section.
+  const section: SectionKey = search.section ?? "dashboard";
 
-  useEffect(() => {
-    if (search.section) {
-      setSection(search.section);
-    }
-  }, [search.section]);
+  // Update the URL whenever the admin selects a section.
+  function handleSectionChange(newSection: SectionKey) {
+    navigate({
+      to: "/admin",
+      search: {
+        section: newSection,
+      },
+    });
+  }
 
   const panels: Record<SectionKey, React.ReactNode> = {
-    dashboard: <Dashboard res={res} orders={orders} onSection={setSection} />,
+    dashboard: <Dashboard res={res} orders={orders} onSection={handleSectionChange} />,
 
     bookings: <Bookings res={res} />,
 
@@ -114,7 +122,7 @@ function Admin() {
   };
 
   return (
-    <AdminShell section={section} onSection={setSection} res={res} orders={orders}>
+    <AdminShell section={section} onSection={handleSectionChange} res={res} orders={orders}>
       <div className="mx-auto max-w-6xl">{panels[section]}</div>
     </AdminShell>
   );

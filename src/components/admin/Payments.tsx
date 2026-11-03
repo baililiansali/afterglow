@@ -1,11 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Filter, Eye, LayoutGrid, List, CheckCircle2 } from "lucide-react";
+
+import {
+  Filter,
+  Eye,
+  Pencil,
+  LayoutGrid,
+  List,
+  RefreshCw,
+  Search,
+  Wallet,
+  Music,
+  Utensils,
+  CalendarDays,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Pagination } from "@/components/Pagination";
 
 import {
   Dialog,
@@ -62,6 +76,10 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState("");
 
+  // Pagination state.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionRecord | null>(null);
 
   const [editingTransaction, setEditingTransaction] = useState<TransactionRecord | null>(null);
@@ -72,8 +90,10 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
   const [saving, setSaving] = useState(false);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
+  // Exclude rejected and cancelled reservations.
   const validReservations = res.filter((r) => !["rejected", "cancelled"].includes(r.status));
 
+  // Exclude cancelled food orders.
   const validOrders = orders.filter((o) => o.status !== "cancelled");
 
   // GCash transactions are always treated as paid.
@@ -82,7 +102,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     return paymentStatus === "paid" ? "paid" : "unpaid";
   };
 
-  // Revenue includes all GCash transactions as paid.
+  // Revenue calculations.
   const roomRevenue = validReservations
     .filter((r) => getPaymentStatus(r.payment_method, r.payment_status) === "paid")
     .reduce((total, r) => total + Number(r.room_total), 0);
@@ -95,6 +115,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
   const normalizedSearch = search.trim().toLowerCase();
 
+  // Room transactions.
   const roomTransactions: TransactionRecord[] = validReservations.map((r) => {
     const profile = profiles[r.user_id];
 
@@ -119,6 +140,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     };
   });
 
+  // Food transactions.
   const foodTransactions: TransactionRecord[] = validOrders.map((o) => ({
     id: o.id,
     type: "food",
@@ -142,10 +164,13 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     recordStatus: o.status,
   }));
 
+  // Current transactions based on selected tab.
   const currentTransactions = activeTab === "room" ? roomTransactions : foodTransactions;
 
+  // Search and filter transactions.
   const filteredTransactions = currentTransactions.filter((t) => {
     const matchesStatus = status === "all" || t.paymentStatus === status;
+
     const matchesMethod = method === "all" || t.paymentMethod === method;
 
     const searchableValues = [
@@ -170,6 +195,24 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     return matchesStatus && matchesMethod && matchesSearch;
   });
 
+  // Pagination calculations.
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+
+  const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
+
+  // Reset to a valid page when filtered results change.
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  // Change payment tab.
   const changeTab = (tab: PaymentTab) => {
     setActiveTab(tab);
     setStatus("all");
@@ -177,27 +220,34 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     setDraftStatus("all");
     setDraftMethod("all");
     setSearch("");
+    setCurrentPage(1);
   };
 
+  // Open filters.
   const openFilters = () => {
     setDraftStatus(status);
     setDraftMethod(method);
     setFilterOpen(true);
   };
 
+  // Apply filters.
   const applyFilters = () => {
     setStatus(draftStatus);
     setMethod(draftMethod);
+    setCurrentPage(1);
     setFilterOpen(false);
   };
 
+  // Clear filters.
   const clearFilters = () => {
     setStatus("all");
     setMethod("all");
     setDraftStatus("all");
     setDraftMethod("all");
+    setCurrentPage(1);
   };
 
+  // Open edit payment dialog.
   const openEdit = (transaction: TransactionRecord) => {
     setEditingTransaction(transaction);
     setEditMethod(transaction.paymentMethod);
@@ -210,269 +260,445 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
     setSaving(true);
 
-    const table = editingTransaction.type === "room" ? "reservations" : "food_orders";
+    try {
+      const table = editingTransaction.type === "room" ? "reservations" : "food_orders";
 
-    // GCash always means paid.
-    const finalStatus = editMethod === "gcash" ? "paid" : editStatus;
+      // GCash always means paid.
+      const finalStatus = editMethod === "gcash" ? "paid" : editStatus;
 
-    const { data, error } = await supabase
-      .from(table)
-      .update({
-        payment_status: finalStatus,
-        payment_method: editMethod,
-      })
-      .eq("id", editingTransaction.id)
-      .select("id");
+      const { data, error } = await supabase
+        .from(table)
+        .update({
+          payment_status: finalStatus,
+          payment_method: editMethod,
+        })
+        .eq("id", editingTransaction.id)
+        .select("id");
 
-    setSaving(false);
+      if (error) throw error;
 
-    if (error) {
+      if (!data?.length) {
+        throw new Error("Payment details were not updated.");
+      }
+
+      toast.success("Payment details updated successfully.");
+      setEditingTransaction(null);
+
+      await qc.invalidateQueries({ queryKey: ["admin-res"] });
+      await qc.invalidateQueries({ queryKey: ["admin-orders"] });
+    } catch (error) {
       toast.error(errMsg(error));
-      return;
+    } finally {
+      setSaving(false);
     }
-
-    if (!data?.length) {
-      toast.error("Payment details were not updated.");
-      return;
-    }
-
-    toast.success("Payment details updated successfully.");
-    setEditingTransaction(null);
-
-    qc.invalidateQueries({ queryKey: ["admin-res"] });
-    qc.invalidateQueries({ queryKey: ["admin-orders"] });
   };
 
-  // Mark any unpaid transaction as paid, regardless of payment method.
+  // Mark transaction as paid.
   const markAsPaid = async (transaction: TransactionRecord) => {
     setMarkingPaidId(transaction.id);
 
-    const table = transaction.type === "room" ? "reservations" : "food_orders";
+    try {
+      const table = transaction.type === "room" ? "reservations" : "food_orders";
 
-    const { data, error } = await supabase
-      .from(table)
-      .update({ payment_status: "paid" })
-      .eq("id", transaction.id)
-      .select("id");
+      const { data, error } = await supabase
+        .from(table)
+        .update({ payment_status: "paid" })
+        .eq("id", transaction.id)
+        .select("id");
 
-    setMarkingPaidId(null);
+      if (error) throw error;
 
-    if (error) {
+      if (!data?.length) {
+        throw new Error("Payment status was not updated.");
+      }
+
+      toast.success("Payment marked as paid.");
+
+      await qc.invalidateQueries({ queryKey: ["admin-res"] });
+      await qc.invalidateQueries({ queryKey: ["admin-orders"] });
+    } catch (error) {
       toast.error(errMsg(error));
-      return;
+    } finally {
+      setMarkingPaidId(null);
     }
-
-    if (!data?.length) {
-      toast.error("Payment status was not updated.");
-      return;
-    }
-
-    toast.success("Payment marked as paid.");
-
-    qc.invalidateQueries({ queryKey: ["admin-res"] });
-    qc.invalidateQueries({ queryKey: ["admin-orders"] });
   };
 
   const hasActiveFilters = status !== "all" || method !== "all";
 
-  const renderTransaction = (t: TransactionRecord) => (
-    <div
-      key={t.id}
-      className={`rounded-xl border border-border bg-card ${
-        viewMode === "grid"
-          ? "flex flex-col gap-4 p-4"
-          : "flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between"
+  // Payment method badge.
+  const PaymentMethodBadge = ({ paymentMethod }: { paymentMethod: "cash" | "gcash" }) => (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold ${
+        paymentMethod === "gcash"
+          ? "bg-primary/10 text-primary"
+          : "bg-secondary text-muted-foreground"
       }`}
     >
-      {/* TRANSACTION INFORMATION */}
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="font-semibold">{t.reference}</p>
+      {paymentMethod === "gcash" ? "GCash" : "Cash"}
+    </span>
+  );
 
-        <div>
-          <span
-            className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${
-              t.paymentMethod === "gcash"
-                ? "bg-primary/10 text-primary"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            {t.paymentMethod === "gcash" ? "GCash" : "Cash"}
-          </span>
+  // Paid status badge.
+  const PaymentStatusBadge = ({ paymentStatus }: { paymentStatus: "paid" | "unpaid" }) =>
+    paymentStatus === "paid" ? (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-600">
+        Paid
+      </span>
+    ) : null;
+
+  // Grid payment display.
+  const GridPaymentDisplay = ({ transaction }: { transaction: TransactionRecord }) => {
+    const isUpdating = markingPaidId === transaction.id;
+
+    if (transaction.paymentStatus === "paid") {
+      return <PaymentStatusBadge paymentStatus="paid" />;
+    }
+
+    return (
+      <Button
+        type="button"
+        size="sm"
+        className="ml-auto h-8 shrink-0 gap-1.5 px-3 text-xs"
+        disabled={isUpdating}
+        onClick={() => void markAsPaid(transaction)}
+      >
+        {isUpdating && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+        {isUpdating ? "Updating..." : "Mark Paid"}
+      </Button>
+    );
+  };
+
+  // Grid actions: Details and Edit buttons with icons and labels.
+  const GridTransactionActions = ({ transaction }: { transaction: TransactionRecord }) => (
+    <div className="flex items-center justify-end gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => setSelectedTransaction(transaction)}
+      >
+        <Eye className="mr-1.5 h-4 w-4" />
+        Details
+      </Button>
+
+      <Button type="button" size="sm" variant="outline" onClick={() => openEdit(transaction)}>
+        <Pencil className="mr-1.5 h-4 w-4" />
+        Edit
+      </Button>
+    </div>
+  );
+
+  // List actions: both Edit and Details are icon-only.
+  const ListTransactionActions = ({ transaction }: { transaction: TransactionRecord }) => (
+    <div className="flex items-center justify-end gap-1">
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        onClick={() => openEdit(transaction)}
+        title="Edit payment"
+        aria-label="Edit payment"
+        className="text-muted-foreground hover:bg-secondary hover:text-foreground"
+      >
+        <Pencil className="h-4 w-4" />
+      </Button>
+
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        onClick={() => setSelectedTransaction(transaction)}
+        title="View details"
+        aria-label="View transaction details"
+        className="text-muted-foreground hover:bg-secondary hover:text-foreground"
+      >
+        <Eye className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+
+  // Grid transaction card.
+  const renderGridCard = (t: TransactionRecord) => (
+    <div
+      key={t.id}
+      className="rounded-xl border border-border bg-card p-4 transition-colors hover:bg-secondary/30"
+    >
+      {/* HEADER */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold">{t.reference}</p>
+          <p className="mt-1 truncate text-sm text-muted-foreground">{t.customer}</p>
         </div>
 
-        <p className="pt-1 text-sm font-medium">
-          {t.customer} · {t.room}
-          {t.roomNumber ? ` (${t.roomNumber})` : ""}
-        </p>
-
-        <p className="text-xs text-muted-foreground">
-          {t.type === "room" ? "Reservation date" : "Submitted"}: {t.date}
-        </p>
-
-        <p className="text-xl font-bold">{peso(t.amount)}</p>
+        <GridPaymentDisplay transaction={t} />
       </div>
 
-      {/* ACTIONS */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 lg:min-w-[190px] lg:border-t-0 lg:pt-0">
-        {/* DETAILS ON THE LEFT */}
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="gap-2"
-          onClick={() => setSelectedTransaction(t)}
-        >
-          <Eye className="h-4 w-4" />
-          Details
-        </Button>
-
-        {/* PAYMENT STATUS OR ACTION ON THE RIGHT */}
-        <div className="flex items-center justify-end">
-          {t.paymentStatus === "paid" ? (
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-bold text-emerald-600">
-              <CheckCircle2 className="h-4 w-4" />
-              PAID
-            </span>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="default"
-              className="gap-1.5 font-bold"
-              disabled={markingPaidId === t.id}
-              onClick={() => markAsPaid(t)}
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              {markingPaidId === t.id ? "Saving..." : "Mark Paid"}
-            </Button>
-          )}
+      {/* TRANSACTION INFORMATION */}
+      <div className="my-4 grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <p className="text-xs text-muted-foreground">Room</p>
+          <p className="mt-1 font-medium">
+            {t.room}
+            {t.roomNumber ? ` (${t.roomNumber})` : ""}
+          </p>
         </div>
+
+        <div>
+          <p className="text-xs text-muted-foreground">Phone Number</p>
+          <p className="mt-1 font-medium">{t.phone || "—"}</p>
+        </div>
+
+        <div className="col-span-2">
+          <p className="text-xs text-muted-foreground">Email</p>
+          <p className="mt-1 break-all font-medium">{t.email || "—"}</p>
+        </div>
+
+        <div>
+          <p className="text-xs text-muted-foreground">
+            {t.type === "room" ? "Reservation Date" : "Order Submitted"}
+          </p>
+          <div className="mt-1 flex items-start gap-2">
+            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <p className="font-medium">{t.date || "—"}</p>
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs text-muted-foreground">Payment Method</p>
+          <div className="mt-1">
+            <PaymentMethodBadge paymentMethod={t.paymentMethod} />
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs text-muted-foreground">Total Amount</p>
+          <p className="mt-1 font-semibold">{peso(t.amount)}</p>
+        </div>
+
+        <div>
+          <p className="text-xs text-muted-foreground">Transaction Type</p>
+          <p className="mt-1 font-medium">
+            {t.type === "room" ? "Room Reservation" : "Food Order"}
+          </p>
+        </div>
+      </div>
+
+      {/* BOTTOM ACTIONS */}
+      <div className="flex justify-end gap-2 border-t border-border pt-3">
+        <GridTransactionActions transaction={t} />
       </div>
     </div>
   );
 
+  // Table transaction row.
+  const renderTableRow = (t: TransactionRecord) => (
+    <tr key={t.id} className="border-t border-border transition-colors hover:bg-secondary/30">
+      {/* Transaction */}
+      <td className="p-3">
+        <p className="font-semibold">{t.reference}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t.type === "room" ? "Room Reservation" : "Food Order"}
+        </p>
+      </td>
+
+      {/* Customer */}
+      <td className="p-3">
+        <p className="font-medium">{t.customer}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t.email || "No email"}</p>
+      </td>
+
+      {/* Room */}
+      <td className="p-3">
+        <p className="font-medium">{t.room}</p>
+        {t.roomNumber && <p className="mt-1 text-xs text-muted-foreground">Room {t.roomNumber}</p>}
+      </td>
+
+      {/* Amount / Date */}
+      <td className="p-3">
+        <p className="font-semibold tabular-nums">{peso(t.amount)}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t.date}</p>
+      </td>
+
+      {/* Payment Method */}
+      <td className="p-3">
+        <span className="text-sm font-medium">
+          {t.paymentMethod === "gcash" ? "GCash" : "Cash"}
+        </span>
+      </td>
+
+      {/* Actions */}
+      <td className="p-3">
+        <ListTransactionActions transaction={t} />
+      </td>
+
+      {/* Payment Status - LAST COLUMN */}
+      <td className="p-3">
+        {t.paymentStatus === "paid" ? (
+          <PaymentStatusBadge paymentStatus="paid" />
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void markAsPaid(t)}
+            disabled={markingPaidId === t.id}
+          >
+            {markingPaidId === t.id && <RefreshCw className="h-4 w-4 animate-spin" />}
+            <span className="ml-2">{markingPaidId === t.id ? "Saving..." : "Mark Paid"}</span>
+          </Button>
+        )}
+      </td>
+    </tr>
+  );
+
   return (
-    <div className="mt-4 space-y-6">
+    <div className="mt-4 space-y-5 text-foreground">
       {/* PAGE HEADER */}
       <div>
-        <h1 className="font-display text-2xl font-bold">Transactions</h1>
+        <h1 className="font-display text-xl font-bold">Transactions</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Monitor and manage room reservation and food order payments.
         </p>
       </div>
 
       {/* REVENUE SUMMARY */}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Total Collected</p>
-          <p className="mt-1 font-display text-2xl font-bold">{peso(totalRevenue)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Room and food payments</p>
-        </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <RevenueCard
+          label="Total Collected"
+          value={totalRevenue}
+          description="Room and food payments"
+          icon={<Wallet className="h-5 w-5" />}
+          accent="primary"
+        />
 
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Room Revenue</p>
-          <p className="mt-1 font-display text-2xl font-bold">{peso(roomRevenue)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Collected reservation payments</p>
-        </div>
+        <RevenueCard
+          label="Room Revenue"
+          value={roomRevenue}
+          description="Collected reservation payments"
+          icon={<Music className="h-5 w-5" />}
+          accent="accent"
+        />
 
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Food Revenue</p>
-          <p className="mt-1 font-display text-2xl font-bold">{peso(foodRevenue)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Collected food order payments</p>
-        </div>
+        <RevenueCard
+          label="Food Revenue"
+          value={foodRevenue}
+          description="Collected food order payments"
+          icon={<Utensils className="h-5 w-5" />}
+          accent="chart"
+        />
       </div>
 
       {/* MAIN TABS */}
-      <div className="flex flex-wrap gap-2 border-b border-border pb-3">
-        <Button
-          type="button"
-          variant={activeTab === "room" ? "default" : "outline"}
-          onClick={() => changeTab("room")}
-        >
-          Room Payments
-        </Button>
+      <div>
+        <div className="flex flex-wrap gap-2 border-b border-border pb-3">
+          <Button
+            type="button"
+            variant={activeTab === "room" ? "default" : "outline"}
+            onClick={() => changeTab("room")}
+          >
+            <Music className="mr-2 h-4 w-4" />
+            Room Payments
+          </Button>
 
-        <Button
-          type="button"
-          variant={activeTab === "food" ? "default" : "outline"}
-          onClick={() => changeTab("food")}
-        >
-          Food Payments
-        </Button>
+          <Button
+            type="button"
+            variant={activeTab === "food" ? "default" : "outline"}
+            onClick={() => changeTab("food")}
+          >
+            <Utensils className="mr-2 h-4 w-4" />
+            Food Payments
+          </Button>
+        </div>
       </div>
 
       {/* TRANSACTIONS */}
       <div className="space-y-4">
         <div>
-          <h2 className="font-display text-lg font-bold">
+          <h2 className="font-display text-lg font-semibold">
             {activeTab === "room" ? "Room Transactions" : "Food Transactions"}
           </h2>
-          <p className="text-sm text-muted-foreground">
+
+          <p className="mt-1 text-sm text-muted-foreground">
             {activeTab === "room"
               ? "Manage payments collected for room reservations."
               : "Manage payments collected for food orders."}
           </p>
+
+          <p className="mt-1 text-xs text-muted-foreground">
+            {filteredTransactions.length} transaction
+            {filteredTransactions.length !== 1 ? "s" : ""} found
+          </p>
         </div>
 
-        {/* SEARCH, FILTER, VIEW */}
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            placeholder={
-              activeTab === "room"
-                ? "Search reservation or customer..."
-                : "Search order, reservation or customer..."
-            }
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="sm:flex-1"
-          />
+        {/* TOOLBAR */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            {/* SEARCH */}
+            <div className="relative min-w-[220px] flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 
-          <Button type="button" variant="outline" onClick={openFilters} className="gap-2">
-            <Filter className="h-4 w-4" />
-            Filter
-            {hasActiveFilters && (
-              <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                {(status !== "all" ? 1 : 0) + (method !== "all" ? 1 : 0)}
-              </span>
-            )}
-          </Button>
+              <Input
+                placeholder={
+                  activeTab === "room"
+                    ? "Search reservation or customer..."
+                    : "Search order, reservation or customer..."
+                }
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-9"
+              />
+            </div>
 
-          <div className="flex items-center rounded-md border border-border p-1">
+            {/* FILTER */}
+            <Button type="button" variant="outline" onClick={openFilters}>
+              <Filter className="mr-2 h-4 w-4" />
+              Filter
+              {hasActiveFilters && (
+                <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                  {(status !== "all" ? 1 : 0) + (method !== "all" ? 1 : 0)}
+                </span>
+              )}
+            </Button>
+          </div>
+
+          {/* GRID / LIST TOGGLE */}
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
             <Button
-              type="button"
-              size="icon"
-              variant={viewMode === "grid" ? "secondary" : "ghost"}
-              title="Grid view"
+              size="sm"
+              variant={viewMode === "grid" ? "default" : "ghost"}
               onClick={() => setViewMode("grid")}
             >
-              <LayoutGrid className="h-4 w-4" />
+              <LayoutGrid className="mr-1.5 h-4 w-4" />
+              Grid
             </Button>
 
             <Button
-              type="button"
-              size="icon"
-              variant={viewMode === "list" ? "secondary" : "ghost"}
-              title="List view"
+              size="sm"
+              variant={viewMode === "list" ? "default" : "ghost"}
               onClick={() => setViewMode("list")}
             >
-              <List className="h-4 w-4" />
+              <List className="mr-1.5 h-4 w-4" />
+              List
             </Button>
           </div>
         </div>
 
-        {/* FILTER MODAL */}
+        {/* FILTER DIALOG */}
         <Dialog open={filterOpen} onOpenChange={setFilterOpen}>
-          <DialogContent className="sm:max-w-xl">
+          <DialogContent className="sm:max-w-lg">
             <DialogHeader>
-              <DialogTitle className="text-xl">Filter Transactions</DialogTitle>
+              <DialogTitle>Transaction Filters</DialogTitle>
               <DialogDescription>
                 Select the payment status and method to display.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-5 py-3">
+            <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="payment-status-filter">Payment Status</Label>
+
                 <select
                   id="payment-status-filter"
                   value={draftStatus}
@@ -487,6 +713,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
               <div className="space-y-2">
                 <Label htmlFor="payment-method-filter">Payment Method</Label>
+
                 <select
                   id="payment-method-filter"
                   value={draftMethod}
@@ -502,13 +729,14 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
             <DialogFooter className="flex flex-row justify-between gap-2 sm:justify-between">
               <Button type="button" variant="ghost" onClick={clearFilters}>
-                Clear
+                Clear all
               </Button>
 
               <div className="flex gap-2">
                 <Button type="button" variant="outline" onClick={() => setFilterOpen(false)}>
                   Cancel
                 </Button>
+
                 <Button type="button" onClick={applyFilters}>
                   Apply Filters
                 </Button>
@@ -519,26 +747,49 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
         {/* TRANSACTION RECORDS */}
         {filteredTransactions.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center">
-            <p className="font-medium">No transactions found</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Try changing your search or filters.
-            </p>
+          <div className="rounded-xl border border-border bg-card p-10 text-center text-muted-foreground">
+            <p className="font-medium">No transactions found.</p>
+            <p className="mt-1 text-xs">Try changing your search or filters.</p>
+          </div>
+        ) : viewMode === "grid" ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {paginatedTransactions.map(renderGridCard)}
           </div>
         ) : (
-          <div
-            className={
-              viewMode === "grid"
-                ? "grid gap-3 md:grid-cols-2 xl:grid-cols-3"
-                : "flex flex-col gap-3"
-            }
-          >
-            {filteredTransactions.map(renderTransaction)}
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full min-w-[1100px] whitespace-nowrap text-sm">
+              <thead className="bg-secondary/50 text-left text-muted-foreground">
+                <tr>
+                  <th className="p-3 font-medium">Transaction</th>
+                  <th className="p-3 font-medium">Customer</th>
+                  <th className="p-3 font-medium">Room</th>
+                  <th className="p-3 font-medium">Amount / Date</th>
+                  <th className="p-3 font-medium">Method</th>
+                  <th className="p-3 text-right font-medium">Actions</th>
+                  <th className="p-3 font-medium">Payment Status</th>
+                </tr>
+              </thead>
+
+              <tbody>{paginatedTransactions.map(renderTableRow)}</tbody>
+            </table>
           </div>
+        )}
+
+        {/* PAGINATION */}
+        {filteredTransactions.length > 0 && (
+          <Pagination
+            page={safeCurrentPage}
+            pageSize={pageSize}
+            totalItems={filteredTransactions.length}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[5, 10]}
+            itemLabel="transactions"
+          />
         )}
       </div>
 
-      {/* DETAILS DIALOG */}
+      {/* TRANSACTION DETAILS DIALOG */}
       <Dialog
         open={!!selectedTransaction}
         onOpenChange={(open) => {
@@ -556,72 +807,82 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
               </DialogHeader>
 
               <div className="space-y-5 py-3">
-                <div className="rounded-xl bg-muted/50 p-4">
+                {/* PAYMENT SUMMARY */}
+                <div className="rounded-xl border border-border bg-secondary/30 p-4">
                   <p className="text-xs text-muted-foreground">Transaction Reference</p>
+
                   <p className="mt-1 font-semibold">{selectedTransaction.reference}</p>
-                  <p className="mt-3 text-2xl font-bold">{peso(selectedTransaction.amount)}</p>
+
+                  <p className="mt-3 font-display text-2xl font-bold">
+                    {peso(selectedTransaction.amount)}
+                  </p>
 
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {selectedTransaction.paymentStatus === "paid" ? (
-                      <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-bold text-emerald-600">
-                        PAID
-                      </span>
-                    ) : (
-                      <span className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-bold text-amber-600">
-                        UNPAID
-                      </span>
-                    )}
+                    <PaymentStatusBadge paymentStatus={selectedTransaction.paymentStatus} />
 
-                    <span className="rounded-md bg-background px-2 py-1 text-xs font-semibold">
-                      {selectedTransaction.paymentMethod === "gcash" ? "GCash" : "Cash"}
-                    </span>
+                    <PaymentMethodBadge paymentMethod={selectedTransaction.paymentMethod} />
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <h3 className="font-semibold">Customer Information</h3>
-                  <DetailRow label="Customer" value={selectedTransaction.customer} />
-                  <DetailRow label="Email" value={selectedTransaction.email} />
-                  <DetailRow label="Phone" value={selectedTransaction.phone} />
-                </div>
+                {/* CUSTOMER INFORMATION */}
+                <section className="space-y-3">
+                  <SectionHeading>Customer Information</SectionHeading>
 
-                <div className="space-y-3">
-                  <h3 className="font-semibold">
+                  <DetailRow label="Customer" value={selectedTransaction.customer} />
+
+                  <DetailRow label="Email" value={selectedTransaction.email} />
+
+                  <DetailRow label="Phone" value={selectedTransaction.phone} />
+                </section>
+
+                {/* RESERVATION OR FOOD ORDER INFORMATION */}
+                <section className="space-y-3">
+                  <SectionHeading>
                     {selectedTransaction.type === "room"
                       ? "Reservation Information"
                       : "Food Order Information"}
-                  </h3>
+                  </SectionHeading>
+
                   <DetailRow label="Reference" value={selectedTransaction.reservationReference} />
+
                   <DetailRow
                     label="Room"
                     value={`${selectedTransaction.room} ${
                       selectedTransaction.roomNumber ? `(${selectedTransaction.roomNumber})` : ""
                     }`}
                   />
+
                   <DetailRow
-                    label={selectedTransaction.type === "room" ? "Reservation date" : "Submitted"}
+                    label={selectedTransaction.type === "room" ? "Reservation Date" : "Submitted"}
                     value={selectedTransaction.date}
                   />
-                  <DetailRow label="Record status" value={selectedTransaction.recordStatus} />
-                </div>
 
-                <div className="space-y-3">
-                  <h3 className="font-semibold">Payment Information</h3>
+                  <DetailRow label="Record Status" value={selectedTransaction.recordStatus} />
+                </section>
+
+                {/* PAYMENT INFORMATION */}
+                <section className="space-y-3">
+                  <SectionHeading>Payment Information</SectionHeading>
+
                   <DetailRow
-                    label="Payment method"
+                    label="Payment Method"
                     value={selectedTransaction.paymentMethod === "gcash" ? "GCash" : "Cash"}
                   />
+
                   <DetailRow
-                    label="Payment status"
+                    label="Payment Status"
                     value={selectedTransaction.paymentStatus.toUpperCase()}
                   />
-                  <DetailRow label="Payer name" value={selectedTransaction.payerName} />
-                  <DetailRow label="Payer account" value={selectedTransaction.payerAccount} />
+
+                  <DetailRow label="Payer Name" value={selectedTransaction.payerName} />
+
+                  <DetailRow label="Payer Account" value={selectedTransaction.payerAccount} />
+
                   <DetailRow
-                    label="Payment reference"
+                    label="Payment Reference"
                     value={selectedTransaction.paymentReference}
                   />
-                </div>
+                </section>
               </div>
 
               <DialogFooter>
@@ -660,20 +921,27 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
           {editingTransaction && (
             <div className="space-y-5 py-3">
-              <div className="rounded-lg bg-muted/50 p-3">
+              <div className="rounded-xl border border-border bg-secondary/30 p-4">
                 <p className="text-xs text-muted-foreground">Transaction Reference</p>
-                <p className="font-semibold">{editingTransaction.reference}</p>
-                <p className="mt-1 text-sm">{editingTransaction.customer}</p>
-                <p className="font-semibold">{peso(editingTransaction.amount)}</p>
+
+                <p className="mt-1 font-semibold">{editingTransaction.reference}</p>
+
+                <p className="mt-1 text-sm text-muted-foreground">{editingTransaction.customer}</p>
+
+                <p className="mt-2 font-display text-xl font-bold">
+                  {peso(editingTransaction.amount)}
+                </p>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="edit-payment-method">Payment Method</Label>
+
                 <select
                   id="edit-payment-method"
                   value={editMethod}
                   onChange={(e) => {
                     const value = e.target.value as "cash" | "gcash";
+
                     setEditMethod(value);
 
                     // Selecting GCash automatically marks it paid.
@@ -691,6 +959,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
               <div className="space-y-2">
                 <Label htmlFor="edit-payment-status">Payment Status</Label>
+
                 <select
                   id="edit-payment-status"
                   value={editMethod === "gcash" ? "paid" : editStatus}
@@ -721,7 +990,8 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
               Cancel
             </Button>
 
-            <Button type="button" onClick={savePayment} disabled={saving}>
+            <Button type="button" onClick={() => void savePayment()} disabled={saving}>
+              {saving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
               {saving ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
@@ -731,10 +1001,57 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
   );
 }
 
+/* REUSABLE COMPONENTS */
+
+function RevenueCard({
+  label,
+  value,
+  description,
+  icon,
+  accent,
+}: {
+  label: string;
+  value: number;
+  description: string;
+  icon: React.ReactNode;
+  accent: "primary" | "accent" | "chart";
+}) {
+  const accentStyles = {
+    primary: "bg-primary/15 text-primary",
+    accent: "bg-accent/15 text-accent",
+    chart: "bg-chart-4/15 text-chart-4",
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/30">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm text-muted-foreground">{label}</p>
+
+          <p className="mt-2 font-display text-2xl font-bold tabular-nums">{peso(value)}</p>
+
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+
+        <div className={`rounded-lg p-3 ${accentStyles[accent]}`}>{icon}</div>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-accent">
+      {children}
+    </h3>
+  );
+}
+
 function DetailRow({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="flex flex-col gap-1 border-b border-border pb-2 sm:flex-row sm:justify-between">
       <span className="text-sm text-muted-foreground">{label}</span>
+
       <span className="break-all text-sm font-medium sm:text-right">{value || "—"}</span>
     </div>
   );

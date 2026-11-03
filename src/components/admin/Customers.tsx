@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+
 import {
   Search,
   Users,
@@ -14,9 +15,17 @@ import {
   Mail,
   Phone,
   User,
-  Clock,
+  Filter,
+  LayoutGrid,
+  List,
 } from "lucide-react";
+
 import { supabase } from "@/integrations/supabase/client";
+import { Pagination } from "@/components/Pagination";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Customer = {
   id: string;
@@ -44,6 +53,8 @@ type Reservation = {
   rooms?: { name: string } | null;
 };
 
+type ViewMode = "list" | "grid";
+
 const formatDate = (date?: string | null) => {
   if (!date) return "—";
 
@@ -59,6 +70,7 @@ const formatTime = (time?: string | null) => {
 
   const [hours, minutes] = time.split(":");
   const date = new Date();
+
   date.setHours(Number(hours), Number(minutes), 0, 0);
 
   return date.toLocaleTimeString("en-PH", {
@@ -103,14 +115,23 @@ const accountStatusStyles = (active: boolean) =>
 export function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Search and filters
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [accountFilter, setAccountFilter] = useState("all");
+  const [filterOpen, setFilterOpen] = useState(false);
 
+  // View and pagination
+  const [view, setView] = useState<ViewMode>("list");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Customer dialogs
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
   const [showProfile, setShowProfile] = useState(false);
@@ -122,6 +143,7 @@ export function Customers() {
   const [saving, setSaving] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
+  // Load customers and reservations
   const loadData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
@@ -154,10 +176,11 @@ export function Customers() {
     loadData();
   }, []);
 
+  // Filter customers
   const filteredCustomers = useMemo(() => {
-    return customers.filter((customer) => {
-      const query = search.toLowerCase().trim();
+    const query = search.toLowerCase().trim();
 
+    return customers.filter((customer) => {
       const matchesSearch =
         !query ||
         customer.full_name?.toLowerCase().includes(query) ||
@@ -178,15 +201,42 @@ export function Customers() {
     });
   }, [customers, search, dateFrom, dateTo, accountFilter]);
 
+  // Reset pagination when search or filters change
+  useEffect(() => {
+    setPage(1);
+  }, [search, dateFrom, dateTo, accountFilter]);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedCustomers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredCustomers.slice(start, start + pageSize);
+  }, [filteredCustomers, currentPage, pageSize]);
+
+  // Active filter count
+  const activeFilterCount = [accountFilter !== "all", !!dateFrom, !!dateTo].filter(Boolean).length;
+
+  // Clear filters
+  const clearFilters = () => {
+    setDateFrom("");
+    setDateTo("");
+    setAccountFilter("all");
+  };
+
+  // Get customer reservations
   const getCustomerReservations = (customerId: string) =>
     reservations
       .filter((reservation) => reservation.user_id === customerId)
       .sort((a, b) => {
         const dateA = `${a.booking_date} ${a.start_time}`;
         const dateB = `${b.booking_date} ${b.start_time}`;
+
         return dateB.localeCompare(dateA);
       });
 
+  // Get customer reservation statistics
   const getCustomerStats = (customerId: string) => {
     const records = getCustomerReservations(customerId);
     const today = new Date().toISOString().slice(0, 10);
@@ -201,11 +251,13 @@ export function Customers() {
     };
   };
 
+  // Open customer profile
   const openProfile = (customer: Customer) => {
     setSelectedCustomer(customer);
     setShowProfile(true);
   };
 
+  // Open edit customer dialog
   const openEdit = (customer: Customer) => {
     setSelectedCustomer(customer);
     setEditName(customer.full_name || "");
@@ -213,6 +265,7 @@ export function Customers() {
     setShowEdit(true);
   };
 
+  // Save customer changes
   const saveCustomer = async () => {
     if (!selectedCustomer) return;
 
@@ -237,6 +290,7 @@ export function Customers() {
 
       setShowEdit(false);
       setSelectedCustomer(null);
+
       await loadData(true);
     } catch (error: any) {
       console.error("Error updating customer:", error);
@@ -246,6 +300,7 @@ export function Customers() {
     }
   };
 
+  // Activate or deactivate customer account
   const toggleCustomerStatus = async (customer: Customer) => {
     const currentlyActive = customer.is_active !== false;
     const nextStatus = !currentlyActive;
@@ -303,30 +358,16 @@ export function Customers() {
   }
 
   return (
-    <div className="space-y-6 text-foreground">
-      {/* Page Header */}
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-accent">
-            Management
-          </p>
-          <h1 className="font-display text-2xl font-bold tracking-wide sm:text-3xl">Customers</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Manage customer accounts and reservation activity.
-          </p>
-        </div>
-
-        <button
-          onClick={() => loadData(true)}
-          disabled={refreshing}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium transition-colors hover:bg-secondary disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+    <div className="mt-4 space-y-4 text-foreground">
+      {/* Page heading */}
+      <div>
+        <h2 className="font-display text-xl font-bold">Customers</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Manage customer accounts and reservation activity.
+        </p>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           label="Total Customers"
@@ -357,114 +398,108 @@ export function Customers() {
         />
       </div>
 
-      {/* Customer Table */}
-      <section className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="border-b border-border p-5">
-          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-            <div>
-              <h2 className="font-display text-lg font-semibold">Customer List</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {filteredCustomers.length} customer
-                {filteredCustomers.length !== 1 ? "s" : ""} found
-              </p>
-            </div>
+      {/* Customer list heading */}
+      <div>
+        <h3 className="font-display text-lg font-semibold">Customer List</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {filteredCustomers.length} customer
+          {filteredCustomers.length !== 1 ? "s" : ""} found
+        </p>
+      </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search name, email, or ID..."
-                  className="w-full rounded-lg border border-border bg-background py-2.5 pl-9 pr-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary sm:w-64"
-                />
-              </div>
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          {/* Search */}
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 
-              <select
-                value={accountFilter}
-                onChange={(e) => setAccountFilter(e.target.value)}
-                className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary"
-              >
-                <option value="all">All Accounts</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
+            <Input
+              id="customer-search"
+              className="pl-9"
+              placeholder="Search name, email, or customer ID..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
 
-          {/* Date Filters */}
-          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Registered From
-              </label>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary"
-              />
-            </div>
+          {/* Filter button */}
+          <Button variant="outline" onClick={() => setFilterOpen(true)}>
+            <Filter className="mr-2 h-4 w-4" />
+            Filter
+            {activeFilterCount > 0 && (
+              <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Registered To
-              </label>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary"
-              />
-            </div>
-
-            <button
-              onClick={() => {
-                setSearch("");
-                setDateFrom("");
-                setDateTo("");
-                setAccountFilter("all");
-              }}
-              className="rounded-lg px-3 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-            >
-              Clear Filters
-            </button>
-          </div>
+          {/* Refresh */}
+          <Button
+            variant="outline"
+            size="icon"
+            title="Refresh customers"
+            onClick={() => void loadData(true)}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          </Button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[850px] text-left text-sm">
-            <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
+        {/* Grid / List toggle */}
+        <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
+          <Button
+            size="sm"
+            variant={view === "grid" ? "default" : "ghost"}
+            onClick={() => setView("grid")}
+          >
+            <LayoutGrid className="mr-1.5 h-4 w-4" />
+            Grid
+          </Button>
+
+          <Button
+            size="sm"
+            variant={view === "list" ? "default" : "ghost"}
+            onClick={() => setView("list")}
+          >
+            <List className="mr-1.5 h-4 w-4" />
+            List
+          </Button>
+        </div>
+      </div>
+
+      {/* Table view */}
+      {view === "list" && (
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full whitespace-nowrap text-sm">
+            <thead className="bg-secondary/50 text-left text-muted-foreground">
               <tr>
-                <th className="px-5 py-4 font-semibold">Customer</th>
-                <th className="px-5 py-4 font-semibold">Contact Number</th>
-                <th className="px-5 py-4 font-semibold">Registered</th>
-                <th className="px-5 py-4 text-center font-semibold">Reservations</th>
-                <th className="px-5 py-4 font-semibold">Account Status</th>
-                <th className="px-5 py-4 text-right font-semibold">Actions</th>
+                <th className="p-3 font-medium">Customer</th>
+                <th className="p-3 font-medium">Contact</th>
+                <th className="p-3 font-medium">Registered</th>
+                <th className="p-3 text-center font-medium">Reservations</th>
+                <th className="p-3 font-medium">Account Status</th>
+                <th className="p-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
 
             <tbody>
               {filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-14 text-center text-muted-foreground">
+                  <td colSpan={6} className="p-10 text-center text-muted-foreground">
                     <UserRound className="mx-auto mb-3 h-9 w-9 opacity-40" />
-                    <p className="font-medium">No customers found</p>
+                    <p className="font-medium">No customers found.</p>
                     <p className="mt-1 text-xs">Try changing your search or filters.</p>
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((customer) => {
+                paginatedCustomers.map((customer) => {
                   const stats = getCustomerStats(customer.id);
                   const active = customer.is_active !== false;
 
                   return (
-                    <tr
-                      key={customer.id}
-                      className="border-t border-border transition-colors hover:bg-secondary/30"
-                    >
-                      <td className="px-5 py-4">
+                    <tr key={customer.id} className="border-t border-border hover:bg-secondary/30">
+                      <td className="p-3">
                         <div className="flex items-center gap-3">
                           {customer.avatar_url ? (
                             <img
@@ -479,7 +514,7 @@ export function Customers() {
                           )}
 
                           <div className="min-w-0">
-                            <p className="truncate font-medium text-foreground">
+                            <p className="truncate font-medium">
                               {customer.full_name || "Unnamed Customer"}
                             </p>
                             <p className="truncate text-xs text-muted-foreground">
@@ -489,17 +524,15 @@ export function Customers() {
                         </div>
                       </td>
 
-                      <td className="px-5 py-4 text-muted-foreground">{customer.phone || "—"}</td>
+                      <td className="p-3 text-muted-foreground">{customer.phone || "—"}</td>
 
-                      <td className="px-5 py-4 text-muted-foreground">
+                      <td className="p-3 text-muted-foreground">
                         {formatDate(customer.created_at)}
                       </td>
 
-                      <td className="px-5 py-4 text-center font-semibold tabular-nums">
-                        {stats.total}
-                      </td>
+                      <td className="p-3 text-center font-medium tabular-nums">{stats.total}</td>
 
-                      <td className="px-5 py-4">
+                      <td className="p-3">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${accountStatusStyles(active)}`}
                         >
@@ -507,18 +540,15 @@ export function Customers() {
                         </span>
                       </td>
 
-                      <td className="px-5 py-4">
+                      <td className="p-3">
                         <div className="flex items-center justify-end gap-1">
-                          <ActionButton
-                            title="View Profile"
-                            onClick={() => openProfile(customer)}
-                          >
+                          <ActionButton title="View Profile" onClick={() => openProfile(customer)}>
                             <Eye className="h-4 w-4" />
                           </ActionButton>
 
                           <ActionButton
                             title={active ? "Deactivate Account" : "Activate Account"}
-                            onClick={() => toggleCustomerStatus(customer)}
+                            onClick={() => void toggleCustomerStatus(customer)}
                             disabled={updatingStatus}
                             destructive={active}
                           >
@@ -533,9 +563,182 @@ export function Customers() {
             </tbody>
           </table>
         </div>
-      </section>
+      )}
 
-      {/* Customer Profile Dialog */}
+      {/* Grid view */}
+      {view === "grid" && (
+        <>
+          {filteredCustomers.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+              <UserRound className="mx-auto mb-3 h-9 w-9 opacity-40" />
+              <p className="font-medium">No customers found.</p>
+              <p className="mt-1 text-xs">Try changing your search or filters.</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {paginatedCustomers.map((customer) => {
+                const stats = getCustomerStats(customer.id);
+                const active = customer.is_active !== false;
+
+                return (
+                  <div
+                    key={customer.id}
+                    className="rounded-xl border border-border bg-card p-4 transition-colors hover:bg-secondary/30"
+                  >
+                    {/* Customer identity and status */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        {customer.avatar_url ? (
+                          <img
+                            src={customer.avatar_url}
+                            alt={customer.full_name || "Customer"}
+                            className="h-12 w-12 shrink-0 rounded-full border border-border object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-bold text-primary">
+                            {getInitials(customer.full_name)}
+                          </div>
+                        )}
+
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold">
+                            {customer.full_name || "Unnamed Customer"}
+                          </p>
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            {customer.email || "No email"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Active / Inactive badge at top-right */}
+                      <span
+                        className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${accountStatusStyles(active)}`}
+                      >
+                        {active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+
+                    {/* Customer information */}
+                    <div className="my-4 grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Contact</p>
+                        <p className="mt-1 truncate font-medium">{customer.phone || "—"}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-muted-foreground">Registered</p>
+                        <p className="mt-1 font-medium">{formatDate(customer.created_at)}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-muted-foreground">Reservations</p>
+                        <p className="mt-1 font-semibold">{stats.total}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-muted-foreground">Customer ID</p>
+                        <p className="mt-1 truncate text-xs font-medium">{customer.id}</p>
+                      </div>
+                    </div>
+
+                    {/* Grid actions */}
+                    <div className="flex justify-end gap-2 border-t border-border pt-3">
+                      <Button variant="outline" size="sm" onClick={() => openProfile(customer)}>
+                        <Eye className="mr-2 h-4 w-4" />
+                        View Profile
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={
+                          active
+                            ? "border-destructive/30 text-destructive hover:bg-destructive/10"
+                            : "border-primary/30 text-primary hover:bg-primary/10"
+                        }
+                        onClick={() => void toggleCustomerStatus(customer)}
+                        disabled={updatingStatus}
+                      >
+                        <Power className="mr-2 h-4 w-4" />
+                        {active ? "Deactivate" : "Activate"}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Pagination */}
+      <Pagination
+        page={currentPage}
+        pageSize={pageSize}
+        totalItems={filteredCustomers.length}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
+
+      {/* Filter dialog */}
+      <Dialog open={filterOpen} onOpenChange={setFilterOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Customer filters</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Account status */}
+            <div>
+              <Label htmlFor="customer-account-status">Account Status</Label>
+
+              <select
+                id="customer-account-status"
+                className="mt-1 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                value={accountFilter}
+                onChange={(e) => setAccountFilter(e.target.value)}
+              >
+                <option value="all">All accounts</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+
+            {/* Registration date range */}
+            <div>
+              <Label htmlFor="customer-date-from">Registered From</Label>
+              <Input
+                id="customer-date-from"
+                type="date"
+                className="mt-1 [color-scheme:dark]"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="customer-date-to">Registered To</Label>
+              <Input
+                id="customer-date-to"
+                type="date"
+                className="mt-1 [color-scheme:dark]"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
+            </div>
+
+            <div className="flex justify-between gap-2 border-t border-border pt-4">
+              <Button variant="ghost" onClick={clearFilters}>
+                Clear all
+              </Button>
+
+              <Button onClick={() => setFilterOpen(false)}>Apply filters</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customer profile dialog */}
       {showProfile && selectedCustomer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-background/80 p-4 backdrop-blur-sm">
           <div className="my-8 max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-border bg-card shadow-2xl">
@@ -556,7 +759,7 @@ export function Customers() {
             </div>
 
             <div className="space-y-6 p-5">
-              {/* Customer Identity */}
+              {/* Customer identity */}
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                 {selectedCustomer.avatar_url ? (
                   <img
@@ -585,16 +788,13 @@ export function Customers() {
                   </span>
                 </div>
 
-                <button
-                  onClick={() => openEdit(selectedCustomer)}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-secondary"
-                >
-                  <Pencil className="h-4 w-4" />
+                <Button variant="outline" onClick={() => openEdit(selectedCustomer)}>
+                  <Pencil className="mr-2 h-4 w-4" />
                   Edit Profile
-                </button>
+                </Button>
               </div>
 
-              {/* Personal Information */}
+              {/* Personal information */}
               <section className="space-y-3">
                 <SectionHeading>Personal Information</SectionHeading>
 
@@ -604,16 +804,19 @@ export function Customers() {
                     label="Customer ID"
                     value={selectedCustomer.id}
                   />
+
                   <InfoCard
                     icon={<Mail className="h-4 w-4" />}
                     label="Email Address"
                     value={selectedCustomer.email || "Not provided"}
                   />
+
                   <InfoCard
                     icon={<Phone className="h-4 w-4" />}
                     label="Contact Number"
                     value={selectedCustomer.phone || "Not provided"}
                   />
+
                   <InfoCard
                     icon={<CalendarDays className="h-4 w-4" />}
                     label="Registration Date"
@@ -622,7 +825,7 @@ export function Customers() {
                 </div>
               </section>
 
-              {/* Reservation Overview */}
+              {/* Reservation overview */}
               <section className="space-y-3">
                 <SectionHeading>Reservation Overview</SectionHeading>
 
@@ -646,10 +849,11 @@ export function Customers() {
                 </div>
               </section>
 
-              {/* Reservation History */}
+              {/* Reservation history */}
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
                   <SectionHeading>Reservation History</SectionHeading>
+
                   <span className="text-xs text-muted-foreground">
                     {getCustomerReservations(selectedCustomer.id).length} records
                   </span>
@@ -657,20 +861,20 @@ export function Customers() {
 
                 <div className="overflow-x-auto rounded-xl border border-border">
                   <table className="w-full min-w-[620px] text-left text-sm">
-                    <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
+                    <thead className="bg-secondary/50 text-xs text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-3 font-semibold">Reference</th>
-                        <th className="px-4 py-3 font-semibold">Room</th>
-                        <th className="px-4 py-3 font-semibold">Date</th>
-                        <th className="px-4 py-3 font-semibold">Time</th>
-                        <th className="px-4 py-3 font-semibold">Status</th>
+                        <th className="p-3 font-medium">Reference</th>
+                        <th className="p-3 font-medium">Room</th>
+                        <th className="p-3 font-medium">Date</th>
+                        <th className="p-3 font-medium">Time</th>
+                        <th className="p-3 font-medium">Status</th>
                       </tr>
                     </thead>
 
                     <tbody>
                       {getCustomerReservations(selectedCustomer.id).length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                          <td colSpan={5} className="p-10 text-center text-muted-foreground">
                             No reservation history found.
                           </td>
                         </tr>
@@ -680,20 +884,24 @@ export function Customers() {
                             key={reservation.id}
                             className="border-t border-border hover:bg-secondary/30"
                           >
-                            <td className="px-4 py-3 font-medium">
+                            <td className="p-3 font-medium">
                               {reservation.reference_code || reservation.id.slice(0, 8)}
                             </td>
-                            <td className="px-4 py-3 text-muted-foreground">
+
+                            <td className="p-3 text-muted-foreground">
                               {reservation.rooms?.name || "—"}
                             </td>
-                            <td className="px-4 py-3 text-muted-foreground">
+
+                            <td className="p-3 text-muted-foreground">
                               {formatDate(reservation.booking_date)}
                             </td>
-                            <td className="px-4 py-3 text-muted-foreground">
+
+                            <td className="p-3 text-muted-foreground">
                               {formatTime(reservation.start_time)} –{" "}
                               {formatTime(reservation.end_time)}
                             </td>
-                            <td className="px-4 py-3">
+
+                            <td className="p-3">
                               <span
                                 className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyles(reservation.status)}`}
                               >
@@ -710,30 +918,27 @@ export function Customers() {
             </div>
 
             <div className="flex flex-col-reverse justify-between gap-3 border-t border-border p-5 sm:flex-row">
-              <button
-                onClick={() => toggleCustomerStatus(selectedCustomer)}
-                disabled={updatingStatus}
-                className={`rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
+              <Button
+                variant="outline"
+                className={
                   selectedCustomer.is_active !== false
                     ? "border-destructive/30 text-destructive hover:bg-destructive/10"
                     : "border-primary/30 text-primary hover:bg-primary/10"
-                }`}
+                }
+                onClick={() => void toggleCustomerStatus(selectedCustomer)}
+                disabled={updatingStatus}
               >
+                <Power className="mr-2 h-4 w-4" />
                 {selectedCustomer.is_active !== false ? "Deactivate Account" : "Activate Account"}
-              </button>
+              </Button>
 
-              <button
-                onClick={() => setShowProfile(false)}
-                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-              >
-                Close
-              </button>
+              <Button onClick={() => setShowProfile(false)}>Close</Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Edit Customer Dialog */}
+      {/* Edit customer dialog */}
       {showEdit && selectedCustomer && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
@@ -755,26 +960,22 @@ export function Customers() {
 
             <div className="space-y-5 p-5">
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Full Name
-                </label>
-                <input
+                <Label htmlFor="customer-edit-name">Full Name</Label>
+                <Input
+                  id="customer-edit-name"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   placeholder="Enter full name"
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
                 />
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Email Address
-                </label>
-                <input
+                <Label htmlFor="customer-edit-email">Email Address</Label>
+                <Input
+                  id="customer-edit-email"
                   type="email"
                   value={selectedCustomer.email || ""}
                   disabled
-                  className="w-full cursor-not-allowed rounded-lg border border-border bg-secondary px-3 py-2.5 text-sm text-muted-foreground"
                 />
                 <p className="text-xs text-muted-foreground">
                   Email changes are not available in this form.
@@ -782,35 +983,30 @@ export function Customers() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Contact Number
-                </label>
-                <input
+                <Label htmlFor="customer-edit-phone">Contact Number</Label>
+                <Input
+                  id="customer-edit-phone"
                   value={editPhone}
                   onChange={(e) => setEditPhone(e.target.value)}
                   placeholder="Enter contact number"
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 border-t border-border p-5">
-              <button
+            <div className="flex justify-end gap-2 border-t border-border p-5">
+              <Button
+                type="button"
+                variant="outline"
                 onClick={() => setShowEdit(false)}
                 disabled={saving}
-                className="rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium transition-colors hover:bg-secondary"
               >
                 Cancel
-              </button>
+              </Button>
 
-              <button
-                onClick={saveCustomer}
-                disabled={saving}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {saving && <RefreshCw className="h-4 w-4 animate-spin" />}
+              <Button onClick={() => void saveCustomer()} disabled={saving}>
+                {saving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
                 {saving ? "Saving..." : "Save Changes"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -846,6 +1042,7 @@ function SummaryCard({
           <p className="text-sm text-muted-foreground">{label}</p>
           <p className="mt-2 font-display text-2xl font-bold tabular-nums">{value}</p>
         </div>
+
         <div className={`rounded-lg p-3 ${accentStyles[accent]}`}>{icon}</div>
       </div>
     </div>
@@ -872,10 +1069,10 @@ function ActionButton({
       aria-label={title}
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-lg p-2 transition-colors disabled:opacity-50 ${
+      className={`rounded-lg p-2 text-muted-foreground transition-colors disabled:opacity-50 ${
         destructive
-          ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+          ? "hover:bg-destructive/10 hover:text-destructive"
+          : "hover:bg-secondary hover:text-foreground"
       }`}
     >
       {children}
@@ -898,6 +1095,7 @@ function InfoCard({ icon, label, value }: { icon: React.ReactNode; label: string
         {icon}
         <span className="text-xs font-medium">{label}</span>
       </div>
+
       <p className="break-all text-sm font-medium text-foreground">{value}</p>
     </div>
   );
