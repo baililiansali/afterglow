@@ -10,7 +10,7 @@
 <!-- LOVABLE:END -->
 # Afterglow project rules
 
-- The site source of truth is the user's zip export ("afterglow-room-dining-main"). Keep its structure, routes and Midnight Violet palette; never restyle it.
+- The site source of truth is the user's zip export ("SONARA-room-dining-main"). Keep its structure, routes and Midnight Violet palette; never restyle it.
 - Admin mutation buttons and admin status-filter buttons look alike (e.g. "Approve" vs "Approved" filter): in tests, always scope clicks to the booking/order card and use exact matching, or you click the wrong control.
 - Admin/client updates must verify affected rows (`.select()` after update) because RLS can silently drop updates with no error; admin update policies carry WITH CHECK.
 - Booking rules live in database functions (create_reservation, create_in_room_order, cancel_my_reservation, guard trigger) — never move price/slot validation into the browser.

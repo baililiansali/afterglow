@@ -49,8 +49,8 @@ create trigger on_auth_user_created after insert on auth.users for each row exec
 
 create table public.business_settings (
   id int primary key default 1 check (id = 1),
-  business_name text not null default 'Afterglow',
-  contact_email text not null default 'hello@afterglow.ph',
+  business_name text not null default 'SONARA',
+  contact_email text not null default 'hello@sonara.ph',
   contact_phone text not null default '+63 917 000 0000',
   address text not null default 'Makati City, Metro Manila',
   opening_time time not null default '14:00',
@@ -59,7 +59,7 @@ create table public.business_settings (
   max_duration_hours int not null default 6,
   cancellation_note text not null default 'Free cancellation while a booking is Pending or Approved, up to 2 hours before start.',
   ewallet_provider text not null default 'GCash',
-  ewallet_account_name text not null default 'Afterglow',
+  ewallet_account_name text not null default 'Sonara',
   ewallet_account_number text not null default '+63 917 000 0000',
   ewallet_instructions text not null default 'Send the exact total and put your booking reference in the message. Show the receipt at the counter.',
   updated_at timestamptz not null default now()

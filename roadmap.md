@@ -1,6 +1,6 @@
 # Roadmap
 
-## Afterglow rebuild (current session)
+## SONARA rebuild (current session)
 
 - [x] Enable Lovable Cloud, email auth, apply zip schema + seed (20 rooms, 9 menu items, 5 categories, settings)
 - [x] Rebuild site from zip (pages, Midnight Violet colors, images) — button glow/amber variants restored

@@ -66,7 +66,7 @@ export function Header() {
             to="/admin"
             className="flex items-center gap-2 font-display text-lg font-bold tracking-[0.2em]"
           >
-            <Mic2 className="h-5 w-5 text-primary" /> AFTERGLOW
+            <Mic2 className="h-5 w-5 text-primary" /> SONARA
             <span className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-accent">
               Admin
             </span>
@@ -84,7 +84,7 @@ export function Header() {
           to="/"
           className="flex items-center gap-2 font-display text-lg font-bold tracking-[0.2em]"
         >
-          <Mic2 className="h-5 w-5 text-primary" /> AFTERGLOW
+          <Mic2 className="h-5 w-5 text-primary" /> SONARA
         </Link>
         <nav className="hidden flex-1 items-center gap-5 text-sm text-muted-foreground md:flex">
           {links.map((l) => (
