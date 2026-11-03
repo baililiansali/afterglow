@@ -178,10 +178,10 @@ export function Footer() {
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 text-sm text-muted-foreground md:grid-cols-3">
         <div>
           <p className="font-display text-base font-bold tracking-[0.2em] text-foreground">
-            AFTERGLOW
+            SONARA 
           </p>
           <p className="mt-2">
-            Karaoke reimagined. Private rooms, great sound, food delivered to your door.
+            Your own private stage. Sing your heart out, enjoy great food, and make every night unforgettable.
           </p>
         </div>
         <div className="flex flex-col gap-2">

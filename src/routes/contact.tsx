@@ -15,12 +15,12 @@ import { settingsQuery } from "@/lib/queries";
 export const Route = createFileRoute("/contact")({
   head: () => ({
     meta: [
-      { title: "Contact — Afterglow" },
+      { title: "Contact — SONARA" },
       {
         name: "description",
-        content: "Questions about bookings or events? Get in touch with Afterglow.",
+        content: "Questions about bookings or events? Get in touch with SONARA.",
       },
-      { property: "og:title", content: "Contact — Afterglow" },
+      { property: "og:title", content: "Contact — SONARA" },
       { property: "og:description", content: "Questions about bookings or events? Get in touch." },
     ],
   }),

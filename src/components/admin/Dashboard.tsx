@@ -179,7 +179,7 @@ export function Dashboard({
         <div>
           <h2 className="font-display text-3xl font-bold">Hello, {firstName}</h2>
           <p className="text-sm text-muted-foreground">
-            Here's what's happening at Afterglow right now.
+            Here's what's happening at SONARA right now.
           </p>
         </div>
 

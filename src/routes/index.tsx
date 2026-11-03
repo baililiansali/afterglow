@@ -11,12 +11,12 @@ import { ROOM_TYPE_LABELS, type RoomType } from "@/types/afterglow";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Afterglow — Private Karaoke Lounge" },
+      { title: "SONARA — Private Karaoke Lounge" },
       {
         name: "description",
-        content: "Book a private karaoke room, pre-order food and sing all night at Afterglow.",
+        content: "Book a private karaoke room, pre-order food and sing all night at SONARA.",
       },
-      { property: "og:title", content: "Afterglow — Private Karaoke Lounge" },
+      { property: "og:title", content: "SONARA — Private Karaoke Lounge" },
       {
         property: "og:description",
         content: "Book a private karaoke room, pre-order food and sing all night.",
@@ -65,7 +65,7 @@ function Home() {
           </p>
 
           <h1 className="mt-4 max-w-3xl font-display text-5xl font-bold leading-[1.05] md:text-7xl">
-            Your room. Your crew. <span className="text-gradient-glow">Your encore.</span>
+            Your Room. Your Songs. <span className="text-gradient-glow">Your Night.</span>
           </h1>
 
           <p className="mt-6 max-w-xl text-lg text-muted-foreground">

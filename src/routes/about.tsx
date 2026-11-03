@@ -29,7 +29,7 @@ function About() {
       <div className="mx-auto grid max-w-6xl gap-10 px-4 md:grid-cols-2">
         <div className="space-y-4 text-muted-foreground">
           <p>
-            Afterglow is a private karaoke lounge with 20 soundproofed rooms — from cozy four-seat
+            SONARA is a private karaoke lounge with 20 soundproofed rooms — from cozy four-seat
             booths to full VIP suites with a private bar counter.
           </p>
           <p>

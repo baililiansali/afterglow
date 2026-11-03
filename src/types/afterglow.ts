@@ -1,4 +1,4 @@
-// Afterglow domain types — mirror the public database tables (snake_case columns).
+// SONARA domain types — mirror the public database tables (snake_case columns).
 
 export type RoomType = "small" | "medium" | "large" | "vip";
 

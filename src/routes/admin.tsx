@@ -27,18 +27,18 @@ import {
 export const Route = createFileRoute("/admin")({
   head: () => ({
     meta: [
-      { title: "Admin — Afterglow" },
+      { title: "Admin — SONARA" },
       {
         name: "description",
-        content: "Manage Afterglow reservations, food orders, rooms and menu.",
+        content: "Manage SONARA reservations, food orders, rooms and menu.",
       },
       {
         property: "og:title",
-        content: "Admin — Afterglow",
+        content: "Admin — SONARA",
       },
       {
         property: "og:description",
-        content: "Afterglow admin dashboard.",
+        content: "SONARA admin dashboard.",
       },
       { name: "robots", content: "noindex" },
     ],

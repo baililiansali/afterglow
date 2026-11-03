@@ -22,12 +22,12 @@ import { supabase } from "@/integrations/supabase/client";
 export const Route = createFileRoute("/menu")({
   head: () => ({
     meta: [
-      { title: "Food & Drinks — Afterglow" },
+      { title: "Food & Drinks — SONARA" },
       {
         name: "description",
         content: "Snacks, platters, meals and drinks delivered to your karaoke room.",
       },
-      { property: "og:title", content: "Food & Drinks — Afterglow" },
+      { property: "og:title", content: "Food & Drinks — SONARA" },
       {
         property: "og:description",
         content: "Snacks, platters, meals and drinks delivered to your karaoke room.",

@@ -18,10 +18,10 @@ import { PageHeader, RequireAuth } from "@/components/SiteChrome";
 export const Route = createFileRoute("/profile")({
   head: () => ({
     meta: [
-      { title: "My Account — Afterglow" },
-      { name: "description", content: "View your Afterglow account details and booking activity." },
-      { property: "og:title", content: "My Account — Afterglow" },
-      { property: "og:description", content: "View your Afterglow account details." },
+      { title: "My Account — SONARA" },
+      { name: "description", content: "View your SONARA account details and booking activity." },
+      { property: "og:title", content: "My Account — SONARA" },
+      { property: "og:description", content: "View your SONARA account details." },
     ],
   }),
   component: ProfilePage,

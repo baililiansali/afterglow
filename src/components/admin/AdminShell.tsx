@@ -157,7 +157,7 @@ export function AdminShell({
                 <Mic2 className="h-4 w-4" />
               </div>
               <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-                <p className="font-display text-sm font-bold tracking-[0.2em]">AFTERGLOW</p>
+                <p className="font-display text-sm font-bold tracking-[0.2em]">SONARA</p>
                 <p className="text-[10px] uppercase tracking-widest text-accent">Admin</p>
               </div>
             </div>

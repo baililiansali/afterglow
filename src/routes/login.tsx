@@ -11,13 +11,13 @@ import { useRedirectAdmin } from "@/components/SiteChrome";
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
-      { title: "Sign in — Afterglow" },
+      { title: "Sign in — SONARA" },
       {
         name: "description",
-        content: "Sign in or create an Afterglow account to book karaoke rooms.",
+        content: "Sign in or create an SONARA account to book karaoke rooms.",
       },
-      { property: "og:title", content: "Sign in — Afterglow" },
-      { property: "og:description", content: "Sign in or create an Afterglow account." },
+      { property: "og:title", content: "Sign in — SONARA" },
+      { property: "og:description", content: "Sign in or create an SONARA account." },
     ],
   }),
   component: Login,

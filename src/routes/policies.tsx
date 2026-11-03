@@ -10,12 +10,12 @@ import {
 export const Route = createFileRoute("/policies")({
   head: () => ({
     meta: [
-      { title: "Policies & FAQ — Afterglow" },
+      { title: "Policies & FAQ — SONARA" },
       {
         name: "description",
-        content: "Booking, cancellation, payment and house rules at Afterglow.",
+        content: "Booking, cancellation, payment and house rules at SONARA.",
       },
-      { property: "og:title", content: "Policies & FAQ — Afterglow" },
+      { property: "og:title", content: "Policies & FAQ — SONARA" },
       { property: "og:description", content: "Booking, cancellation, payment and house rules." },
     ],
   }),

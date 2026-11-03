@@ -83,15 +83,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Afterglow — Private Karaoke Rooms" },
+      { title: "SONARA — Private Karaoke Rooms" },
       {
         name: "description",
-        content: "Book private karaoke rooms and order food to your room at Afterglow.",
+        content: "Book private karaoke rooms and order food to your room at SONARA.",
       },
-      { property: "og:title", content: "Afterglow — Private Karaoke Rooms" },
+      { property: "og:title", content: "SONARA — Private Karaoke Rooms" },
       {
         property: "og:description",
-        content: "Book private karaoke rooms and order food to your room at Afterglow.",
+        content: "Book private karaoke rooms and order food to your room at SONARA.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

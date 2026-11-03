@@ -25,12 +25,12 @@ import { ROOM_TYPE_LABELS } from "@/types/afterglow";
 export const Route = createFileRoute("/rooms/$roomId")({
   head: () => ({
     meta: [
-      { title: "Room details — Afterglow" },
+      { title: "Room details — SONARA" },
       {
         name: "description",
         content: "See room details, check availability and book your karaoke session.",
       },
-      { property: "og:title", content: "Room details — Afterglow" },
+      { property: "og:title", content: "Room details — SONARA" },
       { property: "og:description", content: "Check availability and book your karaoke session." },
     ],
   }),

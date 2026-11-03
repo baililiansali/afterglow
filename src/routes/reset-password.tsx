@@ -10,10 +10,10 @@ import { errMsg } from "@/lib/afterglow";
 export const Route = createFileRoute("/reset-password")({
   head: () => ({
     meta: [
-      { title: "Set a new password — Afterglow" },
-      { name: "description", content: "Choose a new password for your Afterglow account." },
-      { property: "og:title", content: "Set a new password — Afterglow" },
-      { property: "og:description", content: "Choose a new password for your Afterglow account." },
+      { title: "Set a new password — SONARA" },
+      { name: "description", content: "Choose a new password for your SONARA account." },
+      { property: "og:title", content: "Set a new password — SONARA" },
+      { property: "og:description", content: "Choose a new password for your SONARA account." },
     ],
   }),
   component: Reset,

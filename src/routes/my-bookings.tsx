@@ -26,9 +26,9 @@ import { cartPayload, useCart } from "@/lib/cart";
 export const Route = createFileRoute("/my-bookings")({
   head: () => ({
     meta: [
-      { title: "My Bookings — Afterglow" },
+      { title: "My Bookings — SONARA" },
       { name: "description", content: "Track your karaoke bookings and food orders." },
-      { property: "og:title", content: "My Bookings — Afterglow" },
+      { property: "og:title", content: "My Bookings — SONARA" },
       { property: "og:description", content: "Track your karaoke bookings and food orders." },
     ],
   }),

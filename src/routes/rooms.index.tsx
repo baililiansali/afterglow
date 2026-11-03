@@ -17,12 +17,12 @@ export const Route = createFileRoute("/rooms/")({
   }),
   head: () => ({
     meta: [
-      { title: "Karaoke Rooms — Afterglow" },
+      { title: "Karaoke Rooms — SONARA" },
       {
         name: "description",
         content: "Browse 20 private karaoke rooms from cozy booths to VIP suites.",
       },
-      { property: "og:title", content: "Karaoke Rooms — Afterglow" },
+      { property: "og:title", content: "Karaoke Rooms — SONARA" },
       {
         property: "og:description",
         content: "Browse 20 private karaoke rooms from cozy booths to VIP suites.",
