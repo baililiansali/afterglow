@@ -18,6 +18,7 @@ import {
   Filter,
   LayoutGrid,
   List,
+  Trash2,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -25,6 +26,13 @@ import { Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Customer = {
@@ -95,15 +103,20 @@ const statusStyles = (status: string) => {
   switch (status?.toLowerCase()) {
     case "completed":
       return "bg-primary/15 text-primary";
+
     case "approved":
       return "bg-accent/15 text-accent";
+
     case "pending":
       return "bg-chart-4/15 text-chart-4";
+
     case "cancelled":
     case "rejected":
       return "bg-destructive/10 text-destructive";
+
     case "checked_in":
       return "bg-glow/15 text-glow";
+
     default:
       return "bg-secondary text-muted-foreground";
   }
@@ -117,7 +130,6 @@ export function Customers() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
 
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
   // Search and filters
   const [search, setSearch] = useState("");
@@ -142,17 +154,20 @@ export function Customers() {
 
   const [saving, setSaving] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
 
   // Load customers and reservations
-  const loadData = async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  const loadData = async () => {
+    setLoading(true);
 
     try {
       const [profilesResult, reservationsResult] = await Promise.all([
-        (supabase as any).from("profiles").select("*").order("created_at", { ascending: false }),
+        supabase
+          .from("profiles")
+          .select("id, full_name, email, phone, avatar_url, created_at, is_active")
+          .order("created_at", { ascending: false }),
 
-        (supabase as any)
+        supabase
           .from("reservations")
           .select("*, rooms(name)")
           .order("booking_date", { ascending: false }),
@@ -161,19 +176,27 @@ export function Customers() {
       if (profilesResult.error) throw profilesResult.error;
       if (reservationsResult.error) throw reservationsResult.error;
 
-      setCustomers((profilesResult.data || []) as Customer[]);
+      const updatedCustomers = (profilesResult.data || []) as Customer[];
+
+      setCustomers(updatedCustomers);
       setReservations((reservationsResult.data || []) as Reservation[]);
+
+      // Update the selected customer if the profile dialog is open.
+      setSelectedCustomer((current) => {
+        if (!current) return null;
+
+        return updatedCustomers.find((customer) => customer.id === current.id) ?? current;
+      });
     } catch (error: any) {
       console.error("Error loading customers:", error);
       alert(error.message || "Unable to load customers.");
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   // Filter customers
@@ -185,6 +208,7 @@ export function Customers() {
         !query ||
         customer.full_name?.toLowerCase().includes(query) ||
         customer.email?.toLowerCase().includes(query) ||
+        customer.phone?.toLowerCase().includes(query) ||
         customer.id.toLowerCase().includes(query);
 
       const registrationDate = customer.created_at?.slice(0, 10);
@@ -208,10 +232,12 @@ export function Customers() {
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / pageSize));
+
   const currentPage = Math.min(page, totalPages);
 
   const paginatedCustomers = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
+
     return filteredCustomers.slice(start, start + pageSize);
   }, [filteredCustomers, currentPage, pageSize]);
 
@@ -243,8 +269,11 @@ export function Customers() {
 
     return {
       total: records.length,
+
       completed: records.filter((r) => r.status === "completed").length,
+
       cancelled: records.filter((r) => r.status === "cancelled" || r.status === "rejected").length,
+
       upcoming: records.filter(
         (r) => (r.status === "pending" || r.status === "approved") && r.booking_date >= today,
       ).length,
@@ -277,7 +306,7 @@ export function Customers() {
     setSaving(true);
 
     try {
-      const { error } = await supabase.functions.invoke("manage-customer", {
+      const { error, data } = await supabase.functions.invoke("manage-customer", {
         body: {
           action: "update_profile",
           userId: selectedCustomer.id,
@@ -287,11 +316,12 @@ export function Customers() {
       });
 
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
       setShowEdit(false);
       setSelectedCustomer(null);
 
-      await loadData(true);
+      await loadData();
     } catch (error: any) {
       console.error("Error updating customer:", error);
       alert(error.message || "Unable to update customer information.");
@@ -316,7 +346,7 @@ export function Customers() {
     setUpdatingStatus(true);
 
     try {
-      const { error } = await supabase.functions.invoke("manage-customer", {
+      const { error, data } = await supabase.functions.invoke("manage-customer", {
         body: {
           action: "set_active",
           userId: customer.id,
@@ -325,20 +355,77 @@ export function Customers() {
       });
 
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
-      await loadData(true);
+      await loadData();
 
       if (selectedCustomer?.id === customer.id) {
-        setSelectedCustomer({
-          ...selectedCustomer,
-          is_active: nextStatus,
-        });
+        setSelectedCustomer((current) =>
+          current
+            ? {
+                ...current,
+                is_active: nextStatus,
+              }
+            : null,
+        );
       }
     } catch (error: any) {
       console.error("Error changing customer status:", error);
       alert(error.message || "Unable to update account status.");
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  // Delete customer account
+  const deleteCustomer = async (customer: Customer) => {
+    const customerName = customer.full_name || "this customer";
+
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete ${customerName}'s account?\n\n` +
+        "This action cannot be undone. The customer will no longer be able to access their account.\n\n" +
+        "Customers with reservation history cannot be deleted. Deactivate their account instead.",
+    );
+
+    if (!confirmed) return;
+
+    setDeletingCustomer(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-customer", {
+        body: {
+          action: "delete_customer",
+          userId: customer.id,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      if (!data?.success) {
+        throw new Error("Unable to delete customer account.");
+      }
+
+      // Remove the customer from the current UI immediately.
+      setCustomers((current) => current.filter((item) => item.id !== customer.id));
+
+      setReservations((current) => current.filter((item) => item.user_id !== customer.id));
+
+      setShowProfile(false);
+      setShowEdit(false);
+      setSelectedCustomer(null);
+
+      alert("Customer account deleted successfully.");
+
+      await loadData();
+    } catch (error: any) {
+      console.error("Error deleting customer:", error);
+      alert(error.message || "Unable to delete customer account.");
+    } finally {
+      setDeletingCustomer(false);
     }
   };
 
@@ -384,7 +471,7 @@ export function Customers() {
         />
 
         <SummaryCard
-          label="Inactive Accounts"
+          label="Deactivated Accounts"
           value={totalInactive}
           icon={<XCircle className="h-5 w-5" />}
           accent="destructive"
@@ -399,72 +486,107 @@ export function Customers() {
       </div>
 
       {/* Customer list heading */}
-      <div>
+      {/* <div>
         <h3 className="font-display text-lg font-semibold">Customer List</h3>
         <p className="mt-1 text-sm text-muted-foreground">
           {filteredCustomers.length} customer
           {filteredCustomers.length !== 1 ? "s" : ""} found
         </p>
-      </div>
+      </div> */}
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <div className="rounded-xl border border-border bg-card p-3">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
           {/* Search */}
-          <div className="relative min-w-[220px] flex-1">
+          <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 
             <Input
               id="customer-search"
-              className="pl-9"
-              placeholder="Search name, email, or customer ID..."
+              className="h-10 w-full pl-9"
+              placeholder="Search name, email, phone, or customer ID..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
 
-          {/* Filter button */}
-          <Button variant="outline" onClick={() => setFilterOpen(true)}>
-            <Filter className="mr-2 h-4 w-4" />
-            Filter
-            {activeFilterCount > 0 && (
-              <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
-                {activeFilterCount}
-              </span>
-            )}
-          </Button>
+          {/* Registration date range */}
+          <div className="grid grid-cols-2 gap-2 xl:flex">
+            <div className="min-w-0 space-y-1 xl:w-[150px]">
+              <Label
+                htmlFor="customer-date-from"
+                className="text-xs text-muted-foreground"
+              >
+                From date
+              </Label>
 
-          {/* Refresh */}
-          <Button
-            variant="outline"
-            size="icon"
-            title="Refresh customers"
-            onClick={() => void loadData(true)}
-            disabled={refreshing}
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          </Button>
-        </div>
+              <Input
+                id="customer-date-from"
+                type="date"
+                className="h-10 w-full [color-scheme:dark]"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+            </div>
 
-        {/* Grid / List toggle */}
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
-          <Button
-            size="sm"
-            variant={view === "grid" ? "default" : "ghost"}
-            onClick={() => setView("grid")}
-          >
-            <LayoutGrid className="mr-1.5 h-4 w-4" />
-            Grid
-          </Button>
+            <div className="min-w-0 space-y-1 xl:w-[150px]">
+              <Label
+                htmlFor="customer-date-to"
+                className="text-xs text-muted-foreground"
+              >
+                To date
+              </Label>
 
-          <Button
-            size="sm"
-            variant={view === "list" ? "default" : "ghost"}
-            onClick={() => setView("list")}
-          >
-            <List className="mr-1.5 h-4 w-4" />
-            List
-          </Button>
+              <Input
+                id="customer-date-to"
+                type="date"
+                className="h-10 w-full [color-scheme:dark]"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Filter and Grid/List */}
+          <div className="flex items-center justify-between gap-3 xl:justify-start">
+            <Button
+              variant="outline"
+              className="h-10"
+              onClick={() => setFilterOpen(true)}
+            >
+              <Filter className="mr-2 h-4 w-4" />
+              Filter
+
+              {activeFilterCount > 0 && (
+                <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+
+            {/* Grid / List toggle */}
+            <div className="flex h-10 items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
+              <Button
+                size="sm"
+                className="h-8"
+                variant={view === "grid" ? "default" : "ghost"}
+                onClick={() => setView("grid")}
+              >
+                <LayoutGrid className="mr-1.5 h-4 w-4" />
+                Grid
+              </Button>
+
+              <Button
+                size="sm"
+                className="h-8"
+                variant={view === "list" ? "default" : "ghost"}
+                onClick={() => setView("list")}
+              >
+                <List className="mr-1.5 h-4 w-4" />
+                List
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -501,17 +623,7 @@ export function Customers() {
                     <tr key={customer.id} className="border-t border-border hover:bg-secondary/30">
                       <td className="p-3">
                         <div className="flex items-center gap-3">
-                          {customer.avatar_url ? (
-                            <img
-                              src={customer.avatar_url}
-                              alt={customer.full_name || "Customer"}
-                              className="h-10 w-10 rounded-full border border-border object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/15 text-sm font-bold text-primary">
-                              {getInitials(customer.full_name)}
-                            </div>
-                          )}
+                          <CustomerAvatar path={customer.avatar_url} name={customer.full_name} />
 
                           <div className="min-w-0">
                             <p className="truncate font-medium">
@@ -536,7 +648,7 @@ export function Customers() {
                         <span
                           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${accountStatusStyles(active)}`}
                         >
-                          {active ? "Active" : "Inactive"}
+                          {active ? "Active" : "Deactivated"}
                         </span>
                       </td>
 
@@ -549,10 +661,19 @@ export function Customers() {
                           <ActionButton
                             title={active ? "Deactivate Account" : "Activate Account"}
                             onClick={() => void toggleCustomerStatus(customer)}
-                            disabled={updatingStatus}
+                            disabled={updatingStatus || deletingCustomer}
                             destructive={active}
                           >
                             <Power className="h-4 w-4" />
+                          </ActionButton>
+
+                          <ActionButton
+                            title="Delete Customer"
+                            onClick={() => void deleteCustomer(customer)}
+                            disabled={deletingCustomer || updatingStatus}
+                            destructive
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </ActionButton>
                         </div>
                       </td>
@@ -588,17 +709,11 @@ export function Customers() {
                     {/* Customer identity and status */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
-                        {customer.avatar_url ? (
-                          <img
-                            src={customer.avatar_url}
-                            alt={customer.full_name || "Customer"}
-                            className="h-12 w-12 shrink-0 rounded-full border border-border object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-bold text-primary">
-                            {getInitials(customer.full_name)}
-                          </div>
-                        )}
+                        <CustomerAvatar
+                          path={customer.avatar_url}
+                          name={customer.full_name}
+                          size="h-12 w-12"
+                        />
 
                         <div className="min-w-0">
                           <p className="truncate font-semibold">
@@ -610,11 +725,10 @@ export function Customers() {
                         </div>
                       </div>
 
-                      {/* Active / Inactive badge at top-right */}
                       <span
                         className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${accountStatusStyles(active)}`}
                       >
-                        {active ? "Active" : "Inactive"}
+                        {active ? "Active" : "Deactivated"}
                       </span>
                     </div>
 
@@ -642,25 +756,10 @@ export function Customers() {
                     </div>
 
                     {/* Grid actions */}
-                    <div className="flex justify-end gap-2 border-t border-border pt-3">
+                    <div className="flex justify-start border-t border-border pt-3">
                       <Button variant="outline" size="sm" onClick={() => openProfile(customer)}>
                         <Eye className="mr-2 h-4 w-4" />
-                        View Profile
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className={
-                          active
-                            ? "border-destructive/30 text-destructive hover:bg-destructive/10"
-                            : "border-primary/30 text-primary hover:bg-primary/10"
-                        }
-                        onClick={() => void toggleCustomerStatus(customer)}
-                        disabled={updatingStatus}
-                      >
-                        <Power className="mr-2 h-4 w-4" />
-                        {active ? "Deactivate" : "Activate"}
+                        View Details
                       </Button>
                     </div>
                   </div>
@@ -692,39 +791,28 @@ export function Customers() {
             <div>
               <Label htmlFor="customer-account-status">Account Status</Label>
 
-              <select
-                id="customer-account-status"
-                className="mt-1 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                value={accountFilter}
-                onChange={(e) => setAccountFilter(e.target.value)}
-              >
-                <option value="all">All accounts</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
+              <Select value={accountFilter} onValueChange={setAccountFilter}>
+                <SelectTrigger
+                  id="customer-account-status"
+                  className="mt-1 h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select account status" />
+                </SelectTrigger>
 
-            {/* Registration date range */}
-            <div>
-              <Label htmlFor="customer-date-from">Registered From</Label>
-              <Input
-                id="customer-date-from"
-                type="date"
-                className="mt-1 [color-scheme:dark]"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className="cursor-pointer">
+                    All accounts
+                  </SelectItem>
 
-            <div>
-              <Label htmlFor="customer-date-to">Registered To</Label>
-              <Input
-                id="customer-date-to"
-                type="date"
-                className="mt-1 [color-scheme:dark]"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
+                  <SelectItem value="active" className="cursor-pointer">
+                    Active
+                  </SelectItem>
+
+                  <SelectItem value="inactive" className="cursor-pointer">
+                    Deactivated
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="flex justify-between gap-2 border-t border-border pt-4">
@@ -761,22 +849,17 @@ export function Customers() {
             <div className="space-y-6 p-5">
               {/* Customer identity */}
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                {selectedCustomer.avatar_url ? (
-                  <img
-                    src={selectedCustomer.avatar_url}
-                    alt={selectedCustomer.full_name || "Customer"}
-                    className="h-16 w-16 rounded-full border border-border object-cover"
-                  />
-                ) : (
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-xl font-bold text-primary">
-                    {getInitials(selectedCustomer.full_name)}
-                  </div>
-                )}
+                <CustomerAvatar
+                  path={selectedCustomer.avatar_url}
+                  name={selectedCustomer.full_name}
+                  size="h-16 w-16 text-xl"
+                />
 
                 <div className="min-w-0 flex-1">
                   <h3 className="font-display text-xl font-bold">
                     {selectedCustomer.full_name || "Unnamed Customer"}
                   </h3>
+
                   <p className="mt-1 text-sm text-muted-foreground">
                     {selectedCustomer.email || "No email address"}
                   </p>
@@ -784,7 +867,9 @@ export function Customers() {
                   <span
                     className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${accountStatusStyles(selectedCustomer.is_active !== false)}`}
                   >
-                    {selectedCustomer.is_active !== false ? "Active Account" : "Inactive Account"}
+                    {selectedCustomer.is_active !== false
+                      ? "Active Account"
+                      : "Deactivated Account"}
                   </span>
                 </div>
 
@@ -836,12 +921,15 @@ export function Customers() {
                     return (
                       <>
                         <StatCard label="Total" value={stats.total} />
+
                         <StatCard label="Completed" value={stats.completed} color="text-primary" />
+
                         <StatCard
                           label="Cancelled"
                           value={stats.cancelled}
                           color="text-destructive"
                         />
+
                         <StatCard label="Upcoming" value={stats.upcoming} color="text-accent" />
                       </>
                     );
@@ -917,22 +1005,41 @@ export function Customers() {
               </section>
             </div>
 
+            {/* Profile actions */}
             <div className="flex flex-col-reverse justify-between gap-3 border-t border-border p-5 sm:flex-row">
-              <Button
-                variant="outline"
-                className={
-                  selectedCustomer.is_active !== false
-                    ? "border-destructive/30 text-destructive hover:bg-destructive/10"
-                    : "border-primary/30 text-primary hover:bg-primary/10"
-                }
-                onClick={() => void toggleCustomerStatus(selectedCustomer)}
-                disabled={updatingStatus}
-              >
-                <Power className="mr-2 h-4 w-4" />
-                {selectedCustomer.is_active !== false ? "Deactivate Account" : "Activate Account"}
-              </Button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  variant="outline"
+                  className={
+                    selectedCustomer.is_active !== false
+                      ? "border-destructive/30 text-destructive hover:bg-destructive/10"
+                      : "border-primary/30 text-primary hover:bg-primary/10"
+                  }
+                  onClick={() => void toggleCustomerStatus(selectedCustomer)}
+                  disabled={updatingStatus || deletingCustomer}
+                >
+                  <Power className="mr-2 h-4 w-4" />
+                  {selectedCustomer.is_active !== false ? "Deactivate Account" : "Activate Account"}
+                </Button>
 
-              <Button onClick={() => setShowProfile(false)}>Close</Button>
+                <Button
+                  variant="outline"
+                  className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                  onClick={() => void deleteCustomer(selectedCustomer)}
+                  disabled={deletingCustomer || updatingStatus}
+                >
+                  {deletingCustomer ? (
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  {deletingCustomer ? "Deleting..." : "Delete Customer"}
+                </Button>
+              </div>
+
+              <Button onClick={() => setShowProfile(false)} disabled={deletingCustomer}>
+                Close
+              </Button>
             </div>
           </div>
         </div>
@@ -1016,6 +1123,72 @@ export function Customers() {
 }
 
 /* Reusable Components */
+
+// Displays customer avatars from the private Supabase Storage bucket.
+function CustomerAvatar({
+  path,
+  name,
+  size = "h-10 w-10",
+}: {
+  path: string | null;
+  name: string | null;
+  size?: string;
+}) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAvatar = async () => {
+      setImageUrl(null);
+
+      if (!path) return;
+
+      // Keep existing HTTP URLs unchanged.
+      if (/^https?:\/\//i.test(path)) {
+        setImageUrl(path);
+        return;
+      }
+
+      const { data, error } = await supabase.storage.from("avatars").createSignedUrl(path, 3600);
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Unable to load customer avatar:", error);
+        return;
+      }
+
+      setImageUrl(data.signedUrl);
+    };
+
+    void loadAvatar();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  if (!imageUrl) {
+    return (
+      <div
+        className={`flex shrink-0 items-center justify-center rounded-full border border-border bg-primary/15 text-sm font-bold text-primary ${size}`}
+      >
+        {getInitials(name)}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imageUrl}
+      alt={name || "Customer"}
+      loading="lazy"
+      className={`shrink-0 rounded-full border border-border object-cover ${size}`}
+      onError={() => setImageUrl(null)}
+    />
+  );
+}
 
 function SummaryCard({
   label,

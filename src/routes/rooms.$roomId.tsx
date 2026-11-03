@@ -37,7 +37,61 @@ export const Route = createFileRoute("/rooms/$roomId")({
   component: RoomPage,
 });
 
-const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+// Always use the Philippines business timezone for booking dates and times.
+const BUSINESS_TIME_ZONE = "Asia/Manila";
+
+function getManilaDateTime() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    time: `${get("hour")}:${get("minute")}:${get("second")}`,
+  };
+}
+
+const today = () => getManilaDateTime().date;
+
+function isPastStart(date: string, start: string) {
+  const now = getManilaDateTime();
+
+  if (date < now.date) return true;
+  if (date > now.date) return false;
+
+  return `${start}:00` <= now.time;
+}
+
+function isSlotTaken(
+  slots: { start_time: string; end_time: string }[],
+  start: string,
+  hours: number,
+) {
+  const end = addHours(start, hours);
+
+  return slots.some((slot) => overlaps(`${start}:00`, `${end}:00`, slot.start_time, slot.end_time));
+}
+
+function isOverlapDatabaseError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+
+  const dbError = error as { code?: string; message?: string };
+
+  return (
+    dbError.code === "23P01" ||
+    dbError.message?.toLowerCase().includes("reservations_no_overlapping_active_room_bookings") ===
+      true
+  );
+}
 
 function RoomPage() {
   useRedirectAdmin();
@@ -88,9 +142,9 @@ function RoomPage() {
 
   const closeH = settings ? Number(settings.closing_time.slice(0, 2)) : 23;
   const maxH = settings?.max_duration_hours ?? 6;
+  const minH = settings?.min_duration_hours ?? 1;
 
-  const isTaken = (s: string, h: number) =>
-    busy.some((b) => overlaps(s + ":00", addHours(s, h) + ":00", b.start_time, b.end_time));
+  const isTaken = (s: string, h: number) => isSlotTaken(busy, s, h);
 
   if (isLoading)
     return <p className="mx-auto max-w-6xl px-4 py-20 text-muted-foreground">Loading…</p>;
@@ -107,8 +161,9 @@ function RoomPage() {
 
   const bookable = room.is_active && !room.maintenance_status;
 
+  // Only show durations allowed by business settings and closing time.
   const validDurations = start
-    ? Array.from({ length: maxH }, (_, i) => i + 1).filter(
+    ? Array.from({ length: Math.max(0, maxH - minH + 1) }, (_, i) => minH + i).filter(
         (h) => Number(start.slice(0, 2)) + h <= closeH,
       )
     : [];
@@ -127,12 +182,64 @@ function RoomPage() {
 
   const qtyOf = (id: string) => cart.items.find((i) => i.id === id)?.quantity ?? 0;
 
-  const toMeals = () => {
-    if (!user) return void navigate({ to: "/login" });
-    if (!start) return void toast.error("Pick a start time.");
-    if (isTaken(start, hours)) return void toast.error("That time overlaps another booking.");
+  // Always fetch fresh availability before moving forward or submitting.
+  const getFreshBusySlots = async () => {
+    await qc.invalidateQueries({
+      queryKey: ["busy", roomId, date],
+      exact: true,
+    });
 
-    setStep(2);
+    return qc.fetchQuery({
+      ...busySlotsQuery(roomId, date),
+      staleTime: 0,
+    });
+  };
+
+  const validateSelection = (slots: { start_time: string; end_time: string }[]): string | null => {
+    if (!date) return "Please select a booking date.";
+
+    if (date < today()) return "You cannot book a date that has already passed.";
+
+    if (!start) return "Please select a start time.";
+
+    if (isPastStart(date, start))
+      return "The selected start time has already passed. Please choose another time.";
+
+    if (!room.is_active || room.maintenance_status)
+      return "This room is currently unavailable for booking.";
+
+    if (guests < 1 || guests > room.capacity)
+      return `Guest count must be between 1 and ${room.capacity}.`;
+
+    if (hours < minH || hours > maxH) return "The selected reservation duration is not allowed.";
+
+    if (Number(start.slice(0, 2)) + hours > closeH)
+      return "Your reservation must end before the business closing time.";
+
+    if (isSlotTaken(slots, start, hours))
+      return "This time slot is no longer available. Please choose another time.";
+
+    return null;
+  };
+
+  const toMeals = async () => {
+    if (!user) return void navigate({ to: "/login" });
+
+    if (!start) return void toast.error("Pick a start time.");
+
+    try {
+      const freshBusy = await getFreshBusySlots();
+      const validationError = validateSelection(freshBusy);
+
+      if (validationError) {
+        toast.error(validationError);
+        return;
+      }
+
+      setStep(2);
+    } catch (error) {
+      toast.error("Unable to check room availability. Please try again.");
+    }
   };
 
   const submit = async () => {
@@ -148,6 +255,16 @@ function RoomPage() {
     setSaving(true);
 
     try {
+      // Recheck availability immediately before creating the reservation.
+      const freshBusy = await getFreshBusySlots();
+      const validationError = validateSelection(freshBusy);
+
+      if (validationError) {
+        toast.error(validationError);
+        setStep(1);
+        return;
+      }
+
       const items = cartPayload(cart.items);
 
       const { data: resId, error } = await supabase.rpc("create_reservation_v3", {
@@ -165,7 +282,18 @@ function RoomPage() {
       });
 
       if (error) {
-        return void toast.error(errMsg(error));
+        // PostgreSQL exclusion constraint: another reservation took this slot.
+        if (isOverlapDatabaseError(error)) {
+          await qc.invalidateQueries({ queryKey: ["busy", roomId, date] });
+          toast.error(
+            "Sorry, this room and time slot was just reserved by someone else. Please choose another time.",
+          );
+          setStep(1);
+          return;
+        }
+
+        toast.error(errMsg(error));
+        return;
       }
 
       const { data: res } = await supabase
@@ -197,10 +325,19 @@ function RoomPage() {
 
       qc.invalidateQueries({ queryKey: ["busy"] });
       qc.invalidateQueries({ queryKey: ["my-bookings"] });
+      qc.invalidateQueries({ queryKey: ["room-status-reservations"] });
 
       setStep(4);
     } catch (error) {
-      toast.error(errMsg(error));
+      if (isOverlapDatabaseError(error)) {
+        await qc.invalidateQueries({ queryKey: ["busy", roomId, date] });
+        toast.error(
+          "Sorry, this room and time slot was just reserved by someone else. Please choose another time.",
+        );
+        setStep(1);
+      } else {
+        toast.error(errMsg(error));
+      }
     } finally {
       setSaving(false);
     }
@@ -386,28 +523,44 @@ function RoomPage() {
 
                   <div className="mt-1.5 grid grid-cols-3 gap-2">
                     {starts.map((s) => {
-                      const taken = isTaken(s, 1);
+                      const past = isPastStart(date, s);
+                      const tooShort = Number(s.slice(0, 2)) + minH > closeH;
+                      const taken = isTaken(s, minH);
+                      const unavailable = past || tooShort || taken;
 
                       return (
                         <button
                           key={s}
                           type="button"
-                          disabled={taken}
+                          disabled={unavailable}
                           onClick={() => {
                             setStart(s);
-                            setHours((h) => Math.min(h, closeH - Number(s.slice(0, 2))));
+
+                            const availableHours = Array.from(
+                              { length: Math.max(0, maxH - minH + 1) },
+                              (_, i) => minH + i,
+                            ).filter((h) => Number(s.slice(0, 2)) + h <= closeH && !isTaken(s, h));
+
+                            setHours(availableHours[0] ?? minH);
                           }}
                           className={`rounded-md border px-2 py-2 text-sm transition ${
                             start === s
                               ? "border-primary bg-primary text-primary-foreground"
-                              : "border-border hover:border-primary/60"
-                          } disabled:cursor-not-allowed disabled:opacity-30 disabled:line-through`}
+                              : unavailable
+                                ? "border-border bg-muted text-muted-foreground"
+                                : "border-border hover:border-primary/60"
+                          } disabled:cursor-not-allowed disabled:opacity-40 disabled:line-through`}
                         >
                           {fmtTime(s)}
                         </button>
                       );
                     })}
                   </div>
+
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Unavailable times are disabled. Pending reservations also hold their selected
+                    slots.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -421,13 +574,25 @@ function RoomPage() {
                       onChange={(e) => setHours(Number(e.target.value))}
                       disabled={!start}
                     >
-                      {(validDurations.length ? validDurations : [hours]).map((h) => (
-                        <option key={h} value={h} className="bg-popover">
-                          {h} hr{h > 1 ? "s" : ""}
-                          {start && isTaken(start, h) ? " (taken)" : ""}
-                        </option>
-                      ))}
+                      {validDurations.map((h) => {
+                        const taken = isTaken(start, h);
+
+                        return (
+                          <option key={h} value={h} disabled={taken} className="bg-popover">
+                            {h} hr{h > 1 ? "s" : ""}
+                            {taken ? " (unavailable)" : ""}
+                          </option>
+                        );
+                      })}
                     </select>
+
+                    {start &&
+                      validDurations.length > 0 &&
+                      validDurations.every((h) => isTaken(start, h)) && (
+                        <p className="mt-1 text-xs text-destructive">
+                          No available duration for this start time.
+                        </p>
+                      )}
                   </div>
 
                   <div>
@@ -468,7 +633,9 @@ function RoomPage() {
                   className="w-full"
                   size="lg"
                   onClick={toMeals}
-                  disabled={!!user && !start}
+                  disabled={
+                    !!user && (!start || validDurations.length === 0 || isTaken(start, hours))
+                  }
                 >
                   {user ? "Continue to meals" : "Sign in to book"}
                 </Button>

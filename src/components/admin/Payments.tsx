@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -13,7 +14,6 @@ import {
   Wallet,
   Music,
   Utensils,
-  CalendarDays,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { supabase } from "@/integrations/supabase/client";
 import { errMsg, fmtDate, peso } from "@/lib/afterglow";
 
@@ -39,6 +47,14 @@ type PaymentTab = "room" | "food";
 type PaymentStatus = "all" | "paid" | "unpaid";
 type PaymentMethod = "all" | "cash" | "gcash";
 type ViewMode = "grid" | "list";
+
+type FoodPaymentItem = {
+  id: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+};
 
 type TransactionRecord = {
   id: string;
@@ -50,6 +66,7 @@ type TransactionRecord = {
   room: string;
   roomNumber: string;
   date: string;
+  dateValue: string;
   amount: number;
   paymentStatus: "paid" | "unpaid";
   paymentMethod: "cash" | "gcash";
@@ -58,9 +75,26 @@ type TransactionRecord = {
   paymentReference: string;
   reservationReference: string;
   recordStatus: string;
+  foodItems: FoodPaymentItem[];
 };
 
-export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] }) {
+type PaymentsProps = {
+  res: ResRow[];
+  orders: OrderRow[];
+  paymentTargetOrderId?: string | null;
+  onPaymentTargetHandled?: () => void;
+  paymentTargetReservationId?: string | null;
+  onReservationPaymentTargetHandled?: () => void;
+};
+
+export function Payments({
+  res,
+  orders,
+  paymentTargetOrderId,
+  onPaymentTargetHandled,
+  paymentTargetReservationId,
+  onReservationPaymentTargetHandled,
+}: PaymentsProps) {
   const qc = useQueryClient();
   const { data: profiles = {} } = useProfiles();
 
@@ -73,10 +107,12 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
   const [draftStatus, setDraftStatus] = useState<PaymentStatus>("all");
   const [draftMethod, setDraftMethod] = useState<PaymentMethod>("all");
 
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  // Pagination state.
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -90,26 +126,37 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
   const [saving, setSaving] = useState(false);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
+  const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
+  const [focusedReservationId, setFocusedReservationId] = useState<string | null>(null);
+
   // Exclude rejected and cancelled reservations.
   const validReservations = res.filter((r) => !["rejected", "cancelled"].includes(r.status));
 
   // Exclude cancelled food orders.
   const validOrders = orders.filter((o) => o.status !== "cancelled");
 
-  // GCash transactions are always treated as paid.
-  const getPaymentStatus = (paymentMethod: string, paymentStatus: string): "paid" | "unpaid" => {
+  // Normalize payment status.
+  const getPaymentStatus = (
+    paymentMethod: string | null | undefined,
+    paymentStatus: string | null | undefined,
+  ): "paid" | "unpaid" => {
     if (paymentMethod === "gcash") return "paid";
     return paymentStatus === "paid" ? "paid" : "unpaid";
+  };
+
+  // Normalize payment method.
+  const getPaymentMethod = (paymentMethod: string | null | undefined): "cash" | "gcash" => {
+    return paymentMethod === "gcash" ? "gcash" : "cash";
   };
 
   // Revenue calculations.
   const roomRevenue = validReservations
     .filter((r) => getPaymentStatus(r.payment_method, r.payment_status) === "paid")
-    .reduce((total, r) => total + Number(r.room_total), 0);
+    .reduce((total, r) => total + Number(r.room_total ?? 0), 0);
 
   const foodRevenue = validOrders
     .filter((o) => getPaymentStatus(o.payment_method, o.payment_status) === "paid")
-    .reduce((total, o) => total + Number(o.food_subtotal), 0);
+    .reduce((total, o) => total + Number(o.food_subtotal ?? 0), 0);
 
   const totalRevenue = roomRevenue + foodRevenue;
 
@@ -129,14 +176,16 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
       room: r.rooms?.name ?? "Room",
       roomNumber: r.rooms?.room_number ?? "",
       date: fmtDate(r.booking_date),
-      amount: Number(r.room_total),
+      dateValue: String(r.booking_date ?? "").slice(0, 10),
+      amount: Number(r.room_total ?? 0),
       paymentStatus: getPaymentStatus(r.payment_method, r.payment_status),
-      paymentMethod: r.payment_method as "cash" | "gcash",
+      paymentMethod: getPaymentMethod(r.payment_method),
       payerName: r.payer_name ?? "",
       payerAccount: r.payer_account_number ?? "",
       paymentReference: r.payment_reference ?? "",
       reservationReference: r.reference_code,
       recordStatus: r.status,
+      foodItems: [],
     };
   });
 
@@ -154,24 +203,94 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
       dateStyle: "medium",
       timeStyle: "short",
     }),
-    amount: Number(o.food_subtotal),
+    dateValue: new Date(o.submitted_at).toLocaleDateString("en-CA"),
+    amount: Number(o.food_subtotal ?? 0),
     paymentStatus: getPaymentStatus(o.payment_method, o.payment_status),
-    paymentMethod: o.payment_method as "cash" | "gcash",
+    paymentMethod: getPaymentMethod(o.payment_method),
     payerName: o.payer_name ?? "",
     payerAccount: o.payer_account_number ?? "",
     paymentReference: o.payment_reference ?? "",
     reservationReference: o.reservations?.reference_code ?? "",
     recordStatus: o.status,
+    foodItems: (o.food_order_items ?? []).map((item) => ({
+      id: item.id,
+      name: item.item_name_snapshot ?? "Food item",
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unit_price_snapshot),
+      lineTotal: Number(item.line_total),
+    })),
   }));
+
+  // Navigate to a specific food transaction.
+  useEffect(() => {
+    if (!paymentTargetOrderId) return;
+
+    const targetOrder = validOrders.find((order) => order.id === paymentTargetOrderId);
+
+    if (!targetOrder) return;
+
+    setActiveTab("food");
+    setViewMode("list");
+    setFocusedOrderId(paymentTargetOrderId);
+    setFocusedReservationId(null);
+
+    setStatus("all");
+    setMethod("all");
+    setDraftStatus("all");
+    setDraftMethod("all");
+    setFromDate("");
+    setToDate("");
+    setSearch("");
+    setCurrentPage(1);
+    setSelectedTransaction(null);
+
+    onPaymentTargetHandled?.();
+  }, [paymentTargetOrderId, orders]);
+
+  // Navigate to a specific room reservation payment.
+  useEffect(() => {
+    if (!paymentTargetReservationId) return;
+
+    const targetReservation = validReservations.find(
+      (reservation) => reservation.id === paymentTargetReservationId,
+    );
+
+    if (!targetReservation) return;
+
+    setActiveTab("room");
+    setViewMode("list");
+    setFocusedReservationId(paymentTargetReservationId);
+    setFocusedOrderId(null);
+
+    setStatus("all");
+    setMethod("all");
+    setDraftStatus("all");
+    setDraftMethod("all");
+    setFromDate("");
+    setToDate("");
+    setSearch("");
+    setCurrentPage(1);
+    setSelectedTransaction(null);
+
+    onReservationPaymentTargetHandled?.();
+  }, [paymentTargetReservationId, res]);
 
   // Current transactions based on selected tab.
   const currentTransactions = activeTab === "room" ? roomTransactions : foodTransactions;
 
   // Search and filter transactions.
   const filteredTransactions = currentTransactions.filter((t) => {
-    const matchesStatus = status === "all" || t.paymentStatus === status;
+    const matchesFocusedOrder =
+      !focusedOrderId || (activeTab === "food" && t.id === focusedOrderId);
 
+    const matchesFocusedReservation =
+      !focusedReservationId || (activeTab === "room" && t.id === focusedReservationId);
+
+    const matchesStatus = status === "all" || t.paymentStatus === status;
     const matchesMethod = method === "all" || t.paymentMethod === method;
+
+    const matchesFromDate = !fromDate || t.dateValue >= fromDate;
+    const matchesToDate = !toDate || t.dateValue <= toDate;
 
     const searchableValues = [
       t.reference,
@@ -192,20 +311,26 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
           .includes(normalizedSearch),
       );
 
-    return matchesStatus && matchesMethod && matchesSearch;
+    return (
+      matchesFocusedOrder &&
+      matchesFocusedReservation &&
+      matchesStatus &&
+      matchesMethod &&
+      matchesFromDate &&
+      matchesToDate &&
+      matchesSearch
+    );
   });
 
-  // Pagination calculations.
+  // Pagination.
   const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
 
   const safeCurrentPage = Math.min(currentPage, totalPages);
-
   const startIndex = (safeCurrentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
 
   const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
 
-  // Reset to a valid page when filtered results change.
   useEffect(() => {
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
@@ -215,10 +340,39 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
   // Change payment tab.
   const changeTab = (tab: PaymentTab) => {
     setActiveTab(tab);
+    setFocusedOrderId(null);
+    setFocusedReservationId(null);
+
     setStatus("all");
     setMethod("all");
     setDraftStatus("all");
     setDraftMethod("all");
+    setFromDate("");
+    setToDate("");
+    setSearch("");
+    setCurrentPage(1);
+  };
+
+  const showAllFoodTransactions = () => {
+    setFocusedOrderId(null);
+    setStatus("all");
+    setMethod("all");
+    setDraftStatus("all");
+    setDraftMethod("all");
+    setFromDate("");
+    setToDate("");
+    setSearch("");
+    setCurrentPage(1);
+  };
+
+  const showAllRoomTransactions = () => {
+    setFocusedReservationId(null);
+    setStatus("all");
+    setMethod("all");
+    setDraftStatus("all");
+    setDraftMethod("all");
+    setFromDate("");
+    setToDate("");
     setSearch("");
     setCurrentPage(1);
   };
@@ -244,6 +398,8 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     setMethod("all");
     setDraftStatus("all");
     setDraftMethod("all");
+    setFromDate("");
+    setToDate("");
     setCurrentPage(1);
   };
 
@@ -263,7 +419,6 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     try {
       const table = editingTransaction.type === "room" ? "reservations" : "food_orders";
 
-      // GCash always means paid.
       const finalStatus = editMethod === "gcash" ? "paid" : editStatus;
 
       const { data, error } = await supabase
@@ -323,7 +478,10 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     }
   };
 
-  const hasActiveFilters = status !== "all" || method !== "all";
+  const hasActiveFilters = status !== "all" || method !== "all" || !!fromDate || !!toDate;
+
+  const activeFilterCount =
+    (status !== "all" ? 1 : 0) + (method !== "all" ? 1 : 0) + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
 
   // Payment method badge.
   const PaymentMethodBadge = ({ paymentMethod }: { paymentMethod: "cash" | "gcash" }) => (
@@ -368,7 +526,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     );
   };
 
-  // Grid actions: Details and Edit buttons with icons and labels.
+  // Grid actions.
   const GridTransactionActions = ({ transaction }: { transaction: TransactionRecord }) => (
     <div className="flex items-center justify-end gap-2">
       <Button
@@ -388,7 +546,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
     </div>
   );
 
-  // List actions: both Edit and Details are icon-only.
+  // List actions.
   const ListTransactionActions = ({ transaction }: { transaction: TransactionRecord }) => (
     <div className="flex items-center justify-end gap-1">
       <Button
@@ -423,7 +581,6 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
       key={t.id}
       className="rounded-xl border border-border bg-card p-4 transition-colors hover:bg-secondary/30"
     >
-      {/* HEADER */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-semibold">{t.reference}</p>
@@ -433,7 +590,6 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
         <GridPaymentDisplay transaction={t} />
       </div>
 
-      {/* TRANSACTION INFORMATION */}
       <div className="my-4 grid grid-cols-2 gap-4 text-sm">
         <div>
           <p className="text-xs text-muted-foreground">Room</p>
@@ -453,14 +609,35 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
           <p className="mt-1 break-all font-medium">{t.email || "—"}</p>
         </div>
 
+        {t.type === "food" && t.foodItems.length > 0 && (
+          <div className="col-span-2 border-t border-border pt-3">
+            <div className="flex items-center gap-2">
+              <Utensils className="h-4 w-4 text-muted-foreground" />
+              <p className="text-xs font-semibold text-muted-foreground">Food Ordered</p>
+            </div>
+
+            <div className="mt-3 space-y-3">
+              {t.foodItems.map((item) => (
+                <div key={item.id} className="flex items-start justify-between gap-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="font-medium">{item.name}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {item.quantity} × {peso(item.unitPrice)}
+                    </p>
+                  </div>
+
+                  <p className="shrink-0 font-medium">{peso(item.lineTotal)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div>
           <p className="text-xs text-muted-foreground">
             {t.type === "room" ? "Reservation Date" : "Order Submitted"}
           </p>
-          <div className="mt-1 flex items-start gap-2">
-            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <p className="font-medium">{t.date || "—"}</p>
-          </div>
+          <p className="mt-1 font-medium">{t.date || "—"}</p>
         </div>
 
         <div>
@@ -483,7 +660,6 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
         </div>
       </div>
 
-      {/* BOTTOM ACTIONS */}
       <div className="flex justify-end gap-2 border-t border-border pt-3">
         <GridTransactionActions transaction={t} />
       </div>
@@ -492,8 +668,12 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
   // Table transaction row.
   const renderTableRow = (t: TransactionRecord) => (
-    <tr key={t.id} className="border-t border-border transition-colors hover:bg-secondary/30">
-      {/* Transaction */}
+    <tr
+      key={t.id}
+      className={`border-t border-border transition-colors hover:bg-secondary/30 ${
+        focusedOrderId === t.id || focusedReservationId === t.id ? "bg-primary/5" : ""
+      }`}
+    >
       <td className="p-3">
         <p className="font-semibold">{t.reference}</p>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -501,37 +681,31 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
         </p>
       </td>
 
-      {/* Customer */}
       <td className="p-3">
         <p className="font-medium">{t.customer}</p>
         <p className="mt-1 text-xs text-muted-foreground">{t.email || "No email"}</p>
       </td>
 
-      {/* Room */}
       <td className="p-3">
         <p className="font-medium">{t.room}</p>
         {t.roomNumber && <p className="mt-1 text-xs text-muted-foreground">Room {t.roomNumber}</p>}
       </td>
 
-      {/* Amount / Date */}
       <td className="p-3">
         <p className="font-semibold tabular-nums">{peso(t.amount)}</p>
         <p className="mt-1 text-xs text-muted-foreground">{t.date}</p>
       </td>
 
-      {/* Payment Method */}
       <td className="p-3">
         <span className="text-sm font-medium">
           {t.paymentMethod === "gcash" ? "GCash" : "Cash"}
         </span>
       </td>
 
-      {/* Actions */}
       <td className="p-3">
         <ListTransactionActions transaction={t} />
       </td>
 
-      {/* Payment Status - LAST COLUMN */}
       <td className="p-3">
         {t.paymentStatus === "paid" ? (
           <PaymentStatusBadge paymentStatus="paid" />
@@ -612,30 +786,24 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
       {/* TRANSACTIONS */}
       <div className="space-y-4">
-        <div>
-          <h2 className="font-display text-lg font-semibold">
-            {activeTab === "room" ? "Room Transactions" : "Food Transactions"}
-          </h2>
-
-          <p className="mt-1 text-sm text-muted-foreground">
-            {activeTab === "room"
-              ? "Manage payments collected for room reservations."
-              : "Manage payments collected for food orders."}
-          </p>
-
-          <p className="mt-1 text-xs text-muted-foreground">
-            {filteredTransactions.length} transaction
-            {filteredTransactions.length !== 1 ? "s" : ""} found
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          {focusedReservationId && activeTab === "room" ? (
+            <Button type="button" variant="outline" size="sm" onClick={showAllRoomTransactions}>
+              Show All Room Transactions
+            </Button>
+          ) : focusedOrderId && activeTab === "food" ? (
+            <Button type="button" variant="outline" size="sm" onClick={showAllFoodTransactions}>
+              Show All Food Transactions
+            </Button>
+          ) : null}
         </div>
 
         {/* TOOLBAR */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <div className="rounded-xl border border-border bg-card p-3">
+          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-end">
             {/* SEARCH */}
-            <div className="relative min-w-[220px] flex-1">
+            <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-
               <Input
                 placeholder={
                   activeTab === "room"
@@ -647,41 +815,100 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
                   setSearch(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="pl-9"
+                className="h-10 w-full pl-9"
               />
             </div>
 
-            {/* FILTER */}
-            <Button type="button" variant="outline" onClick={openFilters}>
-              <Filter className="mr-2 h-4 w-4" />
-              Filter
-              {hasActiveFilters && (
-                <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
-                  {(status !== "all" ? 1 : 0) + (method !== "all" ? 1 : 0)}
-                </span>
+            {/* DATE RANGE */}
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
+              <div className="min-w-0 space-y-1 sm:w-[150px]">
+                <Label htmlFor="payment-from-date" className="text-xs text-muted-foreground">
+                  From date
+                </Label>
+                <Input
+                  id="payment-from-date"
+                  type="date"
+                  className="h-10 w-full [color-scheme:dark]"
+                  value={fromDate}
+                  max={toDate || undefined}
+                  onChange={(event) => {
+                    setFromDate(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+
+              <div className="min-w-0 space-y-1 sm:w-[150px]">
+                <Label htmlFor="payment-to-date" className="text-xs text-muted-foreground">
+                  To date
+                </Label>
+                <Input
+                  id="payment-to-date"
+                  type="date"
+                  className="h-10 w-full [color-scheme:dark]"
+                  value={toDate}
+                  min={fromDate || undefined}
+                  onChange={(event) => {
+                    setToDate(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* FILTER AND CLEAR DATE */}
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" className="h-10" onClick={openFilters}>
+                <Filter className="mr-2 h-4 w-4" />
+                Filter
+                {hasActiveFilters && (
+                  <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </Button>
+
+              {(fromDate || toDate) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-10 whitespace-nowrap text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  onClick={() => {
+                    setFromDate("");
+                    setToDate("");
+                    setCurrentPage(1);
+                  }}
+                >
+                  Clear dates
+                </Button>
               )}
-            </Button>
-          </div>
+            </div>
 
-          {/* GRID / LIST TOGGLE */}
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
-            <Button
-              size="sm"
-              variant={viewMode === "grid" ? "default" : "ghost"}
-              onClick={() => setViewMode("grid")}
-            >
-              <LayoutGrid className="mr-1.5 h-4 w-4" />
-              Grid
-            </Button>
+            {/* GRID / LIST TOGGLE */}
+            <div className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8"
+                variant={viewMode === "grid" ? "default" : "ghost"}
+                onClick={() => setViewMode("grid")}
+              >
+                <LayoutGrid className="mr-1.5 h-4 w-4" />
+                Grid
+              </Button>
 
-            <Button
-              size="sm"
-              variant={viewMode === "list" ? "default" : "ghost"}
-              onClick={() => setViewMode("list")}
-            >
-              <List className="mr-1.5 h-4 w-4" />
-              List
-            </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8"
+                variant={viewMode === "list" ? "default" : "ghost"}
+                onClick={() => setViewMode("list")}
+              >
+                <List className="mr-1.5 h-4 w-4" />
+                List
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -691,57 +918,80 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
             <DialogHeader>
               <DialogTitle>Transaction Filters</DialogTitle>
               <DialogDescription>
-                Select the payment status and method to display.
+                Filter transactions by payment status and payment method.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
-              <div className="space-y-2">
+              {/* PAYMENT STATUS */}
+              <div className="space-y-1.5">
                 <Label htmlFor="payment-status-filter">Payment Status</Label>
 
-                <select
-                  id="payment-status-filter"
+                <Select
                   value={draftStatus}
-                  onChange={(e) => setDraftStatus(e.target.value as PaymentStatus)}
-                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  onValueChange={(value) => setDraftStatus(value as PaymentStatus)}
                 >
-                  <option value="all">All Statuses</option>
-                  <option value="paid">Paid</option>
-                  <option value="unpaid">Unpaid</option>
-                </select>
+                  <SelectTrigger
+                    id="payment-status-filter"
+                    className="h-10 w-full justify-between text-sm"
+                  >
+                    <SelectValue placeholder="Select payment status" />
+                  </SelectTrigger>
+
+                  <SelectContent position="popper" className="max-h-60">
+                    <SelectItem value="all" className="cursor-pointer">
+                      All statuses
+                    </SelectItem>
+                    <SelectItem value="paid" className="cursor-pointer">
+                      Paid
+                    </SelectItem>
+                    <SelectItem value="unpaid" className="cursor-pointer">
+                      Unpaid
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div className="space-y-2">
+              {/* PAYMENT METHOD */}
+              <div className="space-y-1.5">
                 <Label htmlFor="payment-method-filter">Payment Method</Label>
 
-                <select
-                  id="payment-method-filter"
+                <Select
                   value={draftMethod}
-                  onChange={(e) => setDraftMethod(e.target.value as PaymentMethod)}
-                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  onValueChange={(value) => setDraftMethod(value as PaymentMethod)}
                 >
-                  <option value="all">All Methods</option>
-                  <option value="cash">Cash</option>
-                  <option value="gcash">GCash</option>
-                </select>
+                  <SelectTrigger
+                    id="payment-method-filter"
+                    className="h-10 w-full justify-between text-sm"
+                  >
+                    <SelectValue placeholder="Select payment method" />
+                  </SelectTrigger>
+
+                  <SelectContent position="popper" className="max-h-60">
+                    <SelectItem value="all" className="cursor-pointer">
+                      All methods
+                    </SelectItem>
+                    <SelectItem value="cash" className="cursor-pointer">
+                      Cash
+                    </SelectItem>
+                    <SelectItem value="gcash" className="cursor-pointer">
+                      GCash
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            </div>
 
-            <DialogFooter className="flex flex-row justify-between gap-2 sm:justify-between">
-              <Button type="button" variant="ghost" onClick={clearFilters}>
-                Clear all
-              </Button>
-
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" onClick={() => setFilterOpen(false)}>
-                  Cancel
+              {/* ACTIONS */}
+              <div className="flex justify-between gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={clearFilters}>
+                  Clear all
                 </Button>
 
                 <Button type="button" onClick={applyFilters}>
-                  Apply Filters
+                  Apply filters
                 </Button>
               </div>
-            </DialogFooter>
+            </div>
           </DialogContent>
         </Dialog>
 
@@ -766,7 +1016,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
                   <th className="p-3 font-medium">Amount / Date</th>
                   <th className="p-3 font-medium">Method</th>
                   <th className="p-3 text-right font-medium">Actions</th>
-                  <th className="p-3 font-medium">Payment Status</th>
+                  <th className="p-3 font-medium">Status</th>
                 </tr>
               </thead>
 
@@ -782,7 +1032,10 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
             pageSize={pageSize}
             totalItems={filteredTransactions.length}
             onPageChange={setCurrentPage}
-            onPageSizeChange={setPageSize}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setCurrentPage(1);
+            }}
             pageSizeOptions={[5, 10]}
             itemLabel="transactions"
           />
@@ -796,7 +1049,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
           if (!open) setSelectedTransaction(null);
         }}
       >
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+        <DialogContent className="max-h-[85vh] overflow-y-auto rounded-xl border-border bg-card sm:max-w-xl">
           {selectedTransaction && (
             <>
               <DialogHeader>
@@ -860,6 +1113,55 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
                   <DetailRow label="Record Status" value={selectedTransaction.recordStatus} />
                 </section>
 
+                {/* FOOD ORDERED */}
+                {selectedTransaction.type === "food" && (
+                  <section className="space-y-3">
+                    <SectionHeading>Food Ordered</SectionHeading>
+
+                    {selectedTransaction.foodItems.length > 0 ? (
+                      <div className="rounded-xl border border-border bg-card p-4">
+                        <div className="mb-3 flex items-center gap-2">
+                          <Utensils className="h-4 w-4 text-muted-foreground" />
+                          <p className="text-sm font-semibold">
+                            Order Items ({selectedTransaction.foodItems.length})
+                          </p>
+                        </div>
+
+                        <div className="space-y-4">
+                          {selectedTransaction.foodItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-start justify-between gap-4 border-b border-border pb-3 last:border-0 last:pb-0"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-medium">{item.name}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {item.quantity} × {peso(item.unitPrice)}
+                                </p>
+                              </div>
+
+                              <p className="shrink-0 text-sm font-semibold">
+                                {peso(item.lineTotal)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+                          <span className="text-sm font-semibold">Order Total</span>
+                          <span className="font-display text-lg font-bold">
+                            {peso(selectedTransaction.amount)}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                        No food item details available for this order.
+                      </p>
+                    )}
+                  </section>
+                )}
+
                 {/* PAYMENT INFORMATION */}
                 <section className="space-y-3">
                   <SectionHeading>Payment Information</SectionHeading>
@@ -913,7 +1215,7 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
           if (!open && !saving) setEditingTransaction(null);
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="rounded-xl border-border bg-card sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit Payment</DialogTitle>
             <DialogDescription>Update the payment status and payment method.</DialogDescription>
@@ -944,7 +1246,6 @@ export function Payments({ res, orders }: { res: ResRow[]; orders: OrderRow[] })
 
                     setEditMethod(value);
 
-                    // Selecting GCash automatically marks it paid.
                     if (value === "gcash") {
                       setEditStatus("paid");
                     }
@@ -1013,7 +1314,7 @@ function RevenueCard({
   label: string;
   value: number;
   description: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   accent: "primary" | "accent" | "chart";
 }) {
   const accentStyles = {
@@ -1039,7 +1340,7 @@ function RevenueCard({
   );
 }
 
-function SectionHeading({ children }: { children: React.ReactNode }) {
+function SectionHeading({ children }: { children: ReactNode }) {
   return (
     <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-accent">
       {children}

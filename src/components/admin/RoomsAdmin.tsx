@@ -9,6 +9,14 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { ImagePicker } from "@/components/ImagePicker";
@@ -51,6 +59,8 @@ type Segment = {
 const OPENING_MINUTES = 14 * 60;
 const CLOSING_MINUTES = 23 * 60;
 const TOTAL_MINUTES = CLOSING_MINUTES - OPENING_MINUTES;
+
+const dropdownItemClass = "cursor-pointer";
 
 // --------------------------------------------------
 // DATE AND TIME HELPERS
@@ -313,6 +323,7 @@ function RoomDailySchedule({
                   <span className="text-xs text-muted-foreground">
                     {formatDuration(segment.end - segment.start)}
                   </span>
+
                   <ScheduleBadge status={segment.status} />
                 </div>
               </div>
@@ -724,7 +735,11 @@ export function RoomsAdmin() {
                         <label className="flex items-center gap-2">
                           <Switch
                             checked={room.maintenance_status}
-                            onCheckedChange={(value) => upd(room.id, { maintenance_status: value })}
+                            onCheckedChange={(value) =>
+                              upd(room.id, {
+                                maintenance_status: value,
+                              })
+                            }
                           />
                           Maintenance
                         </label>
@@ -826,7 +841,9 @@ export function RoomsAdmin() {
                               value >= 0 &&
                               value !== Number(room.hourly_rate)
                             ) {
-                              void upd(room.id, { hourly_rate: value });
+                              void upd(room.id, {
+                                hourly_rate: value,
+                              });
                             }
                           }}
                         />
@@ -846,7 +863,11 @@ export function RoomsAdmin() {
                       <td className="p-3">
                         <Switch
                           checked={room.maintenance_status}
-                          onCheckedChange={(value) => upd(room.id, { maintenance_status: value })}
+                          onCheckedChange={(value) =>
+                            upd(room.id, {
+                              maintenance_status: value,
+                            })
+                          }
                         />
                       </td>
 
@@ -922,44 +943,77 @@ export function RoomsAdmin() {
 
           <div className="space-y-4">
             {/* ROOM TYPE */}
-            <div>
+            <div className="space-y-1.5">
               <Label htmlFor="room-type-filter">Room type</Label>
 
-              <select
-                id="room-type-filter"
-                className={selectClass + " mt-1 block w-full"}
-                value={type}
-                onChange={(e) => setType(e.target.value)}
+              <Select
+                value={type || "all"}
+                onValueChange={(value) => setType(value === "all" ? "" : value)}
               >
-                <option value="">All types</option>
+                <SelectTrigger
+                  id="room-type-filter"
+                  className="h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select room type" />
+                </SelectTrigger>
 
-                {ROOM_TYPES.map((roomType) => (
-                  <option key={roomType} value={roomType}>
-                    {roomType === "vip"
-                      ? "VIP"
-                      : roomType.charAt(0).toUpperCase() + roomType.slice(1)}
-                  </option>
-                ))}
-              </select>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className={dropdownItemClass}>
+                    All types
+                  </SelectItem>
+
+                  {ROOM_TYPES.map((roomType) => (
+                    <SelectItem key={roomType} value={roomType} className={dropdownItemClass}>
+                      {roomType === "vip"
+                        ? "VIP"
+                        : roomType.charAt(0).toUpperCase() + roomType.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* ROOM STATUS */}
-            <div>
+            <div className="space-y-1.5">
               <Label htmlFor="room-status-filter">Room status</Label>
 
-              <select
-                id="room-status-filter"
-                className={selectClass + " mt-1 block w-full"}
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
+              <Select
+                value={status || "all"}
+                onValueChange={(value) => setStatus(value === "all" ? "" : value)}
               >
-                <option value="">All statuses</option>
-                <option value="active">Active</option>
-                <option value="full">Full</option>
-                <option value="occupied">Occupied</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="inactive">Inactive</option>
-              </select>
+                <SelectTrigger
+                  id="room-status-filter"
+                  className="h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select room status" />
+                </SelectTrigger>
+
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className={dropdownItemClass}>
+                    All statuses
+                  </SelectItem>
+
+                  <SelectItem value="active" className={dropdownItemClass}>
+                    Active
+                  </SelectItem>
+
+                  <SelectItem value="full" className={dropdownItemClass}>
+                    Full
+                  </SelectItem>
+
+                  <SelectItem value="occupied" className={dropdownItemClass}>
+                    Occupied
+                  </SelectItem>
+
+                  <SelectItem value="maintenance" className={dropdownItemClass}>
+                    Maintenance
+                  </SelectItem>
+
+                  <SelectItem value="inactive" className={dropdownItemClass}>
+                    Inactive
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* FILTER ACTIONS */}

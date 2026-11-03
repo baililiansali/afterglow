@@ -1,14 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Filter, LayoutGrid, List, Search, Plus, Trash2, Eye, Pencil } from "lucide-react";
+import {
+  Filter,
+  LayoutGrid,
+  List,
+  Search,
+  Trash2,
+  Eye,
+  Pencil,
+  CreditCard,
+  ShoppingBag,
+  Clock3,
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
 
-import { StatusBadge, PaymentMethodBadge } from "@/components/StatusBadge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -16,10 +36,9 @@ import { errMsg, peso, fmtDate } from "@/lib/afterglow";
 import { menuQuery } from "@/lib/queries";
 
 import type { OrderRow, FoStatus } from "./shared";
-import { dateCls, fmtStamp, selectCls } from "./ReservationDetail";
+import { dateCls } from "./ReservationDetail";
 
 type ViewMode = "list" | "grid";
-type PaymentStatus = "paid" | "unpaid";
 type SortMode = "submitted" | "booking";
 
 type OrderItem = OrderRow["food_order_items"][number];
@@ -42,14 +61,10 @@ type AddOrderReservation = {
   customer_name: string;
 };
 
-const ORDER_STATUSES: FoStatus[] = [
-  "pending",
-  "confirmed",
-  "served",
-  "cancelled",
-];
+// Only these statuses are available for order management.
+const ORDER_STATUSES: FoStatus[] = ["pending", "served", "cancelled"];
 
-const STATUS_LABELS: Record<FoStatus, string> = {
+const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
   confirmed: "Confirmed",
   preparing: "Preparing",
@@ -59,6 +74,8 @@ const STATUS_LABELS: Record<FoStatus, string> = {
 };
 
 const ADD_ORDER_STATUSES = ["checked_in"];
+
+const dropdownItemClass = "cursor-pointer";
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "—";
@@ -70,6 +87,12 @@ function formatDateTime(value: string | null | undefined) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatPaymentLabel(value: string | null | undefined) {
+  if (!value) return "Not specified";
+
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function totalQuantity(order: OrderRow) {
@@ -91,7 +114,13 @@ function createEditableItems(items: OrderItem[]): EditableItem[] {
   }));
 }
 
-export function Orders({ orders }: { orders: OrderRow[] }) {
+export function Orders({
+  orders,
+  onViewPayment,
+}: {
+  orders: OrderRow[];
+  onViewPayment: (orderId: string) => void;
+}) {
   const qc = useQueryClient();
 
   const { data: menuData } = useQuery(menuQuery);
@@ -132,8 +161,8 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
   // Search and filters
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | FoStatus>("all");
-  const [payment, setPayment] = useState<"all" | PaymentStatus>("all");
-  const [date, setDate] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState<SortMode>("submitted");
 
   const [filterOpen, setFilterOpen] = useState(false);
@@ -161,7 +190,7 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const activeFilterCount = [status !== "all", payment !== "all", sort !== "submitted"].filter(
+  const activeFilterCount = [status !== "all", sort !== "submitted", !!dateFrom, !!dateTo].filter(
     Boolean,
   ).length;
 
@@ -170,14 +199,31 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     [menuData?.items],
   );
 
+  // Food Orders overview
+  const orderOverview = useMemo(
+    () => ({
+      total: orders.filter((order) => order.status !== "cancelled").length,
+      pending: orders.filter((order) => order.status === "pending").length,
+      served: orders.filter((order) => order.status === "served").length,
+      cancelled: orders.filter((order) => order.status === "cancelled").length,
+    }),
+    [orders],
+  );
+
   // Filter food orders
   const list = useMemo(() => {
     const search = q.trim().toLowerCase();
 
     return orders
       .filter((order) => status === "all" || order.status === status)
-      .filter((order) => payment === "all" || order.payment_status === payment)
-      .filter((order) => !date || (order.submitted_at || order.created_at).slice(0, 10) === date)
+      .filter((order) => {
+        const submittedDate = (order.submitted_at || order.created_at).slice(0, 10);
+
+        if (dateFrom && submittedDate < dateFrom) return false;
+        if (dateTo && submittedDate > dateTo) return false;
+
+        return true;
+      })
       .filter((order) => {
         if (!search) return true;
 
@@ -195,16 +241,15 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
       .sort((a, b) =>
         sort === "submitted"
           ? (b.submitted_at || b.created_at).localeCompare(a.submitted_at || a.created_at)
-          : (b.reservations?.booking_date ?? "").localeCompare(a.reservations?.booking_date ?? ""),
+          : (b.reservations?.booking_date ?? "").localeCompare(b.reservations?.booking_date ?? ""),
       );
-  }, [orders, status, payment, date, q, sort]);
+  }, [orders, status, dateFrom, dateTo, q, sort]);
 
   useEffect(() => {
     setPage(1);
-  }, [q, status, payment, date, sort]);
+  }, [q, status, dateFrom, dateTo, sort]);
 
   const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
-
   const currentPage = Math.min(page, totalPages);
 
   const paginatedList = useMemo(() => {
@@ -214,8 +259,9 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
 
   const clearFilters = () => {
     setStatus("all");
-    setPayment("all");
     setSort("submitted");
+    setDateFrom("");
+    setDateTo("");
   };
 
   const selectedReservation = reservationOptions.find(
@@ -227,9 +273,76 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     [newOrderItems],
   );
 
-  // Cancel food order
+  const editedSubtotal = useMemo(
+    () =>
+      editItems.reduce(
+        (sum, item) => sum + Number(item.unit_price_snapshot) * Number(item.quantity),
+        0,
+      ),
+    [editItems],
+  );
+
+  // Open the matching food payment in Transactions.
+  const viewOrderPayment = (order: OrderRow) => {
+    setEditOrder(null);
+    onViewPayment(order.id);
+  };
+
+  // Update food order status.
+  // Only Pending orders can move directly to Served.
+  const updateOrderStatus = async (order: OrderRow) => {
+    if (order.status !== "pending") {
+      toast.error("Only pending orders can be marked as served.");
+      return;
+    }
+
+    if (updatingId === order.id) return;
+
+    setUpdatingId(order.id);
+
+    try {
+      const { data, error } = await supabase
+        .from("food_orders")
+        .update({ status: "served" })
+        .eq("id", order.id)
+        .eq("status", "pending")
+        .select("id");
+
+      if (error) throw error;
+
+      if (!data?.length) {
+        throw new Error("Order status could not be updated. Refresh and try again.");
+      }
+
+      toast.success("Food order marked as Served.");
+
+      if (open?.id === order.id) {
+        setOpen({ ...order, status: "served" });
+      }
+
+      if (editOrder?.id === order.id) {
+        setEditOrder(null);
+      }
+
+      await qc.invalidateQueries({
+        queryKey: ["admin-orders"],
+      });
+    } catch (error) {
+      toast.error(errMsg(error));
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  // Cancel food order.
+  // Only Pending orders can be cancelled.
   const cancelOrder = async (order: OrderRow) => {
-    if (order.status === "cancelled") return;
+    if (order.status !== "pending") {
+      toast.error("Only pending orders can be cancelled.");
+      return;
+    }
+
+    if (updatingId === order.id) return;
 
     if (!window.confirm(`Are you sure you want to cancel food order ${order.reference_code}?`)) {
       return;
@@ -242,6 +355,7 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
         .from("food_orders")
         .update({ status: "cancelled" })
         .eq("id", order.id)
+        .eq("status", "pending")
         .select("id");
 
       if (error) throw error;
@@ -252,8 +366,13 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
 
       toast.success("Food order cancelled.");
 
-      if (open?.id === order.id) setOpen(null);
-      if (editOrder?.id === order.id) setEditOrder(null);
+      if (open?.id === order.id) {
+        setOpen({ ...order, status: "cancelled" });
+      }
+
+      if (editOrder?.id === order.id) {
+        setEditOrder(null);
+      }
 
       await qc.invalidateQueries({
         queryKey: ["admin-orders"],
@@ -265,51 +384,54 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     }
   };
 
-  // Mark food order as paid
-  const markPaid = async (order: OrderRow) => {
-    if (order.payment_status === "paid") return;
+  // Status display.
+  // Pending orders have Serve and Cancel buttons.
+  // Served and Cancelled orders only show their status badge.
+  const statusControl = (order: OrderRow) => (
+    <div className="flex items-center justify-end gap-2">
+      {order.status === "pending" ? (
+        <>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8"
+            disabled={updatingId === order.id}
+            onClick={() => void updateOrderStatus(order)}
+          >
+            {updatingId === order.id ? "Updating..." : "Serve"}
+          </Button>
 
-    if (order.status === "cancelled") {
-      toast.error("A cancelled food order cannot be marked as paid.");
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={updatingId === order.id}
+            onClick={() => void cancelOrder(order)}
+          >
+            Cancel
+          </Button>
+        </>
+      ) : (
+        <StatusBadge status={order.status} />
+      )}
+    </div>
+  );
+
+  // Open Edit dialog.
+  const startEdit = (order: OrderRow) => {
+    if (order.status !== "pending") {
+      toast.error("Only pending orders can be edited.");
       return;
     }
 
-    setUpdatingId(order.id);
-
-    try {
-      const { data, error } = await supabase
-        .from("food_orders")
-        .update({ payment_status: "paid" })
-        .eq("id", order.id)
-        .select("id");
-
-      if (error) throw error;
-
-      if (!data?.length) {
-        throw new Error("Food order payment could not be updated. Refresh and try again.");
-      }
-
-      toast.success("Food order payment recorded.");
-
-      await qc.invalidateQueries({
-        queryKey: ["admin-orders"],
-      });
-    } catch (error) {
-      toast.error(errMsg(error));
-    } finally {
-      setUpdatingId(null);
-    }
-  };
-
-  // Open Edit dialog
-  const startEdit = (order: OrderRow) => {
     setEditOrder(order);
     setEditItems(createEditableItems(order.food_order_items));
     setSpecialInstructions(order.special_instructions ?? "");
     setSelectedMenuItem("");
   };
 
-  // Add menu item to existing order
+  // Add menu item to existing order.
   const addMenuItem = () => {
     if (!selectedMenuItem) {
       toast.error("Please select a menu item.");
@@ -360,16 +482,7 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     setEditItems((current) => current.filter((item) => item.id !== id));
   };
 
-  const editedSubtotal = useMemo(
-    () =>
-      editItems.reduce(
-        (sum, item) => sum + Number(item.unit_price_snapshot) * Number(item.quantity),
-        0,
-      ),
-    [editItems],
-  );
-
-  // Reset Add Order form
+  // Reset Add Order form.
   const resetNewOrder = () => {
     setNewReservationId("");
     setNewOrderItems([]);
@@ -377,7 +490,7 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     setNewSpecialInstructions("");
   };
 
-  // Add menu item to new order
+  // Add menu item to new order.
   const addNewOrderItem = () => {
     if (!newSelectedMenuItem) {
       toast.error("Please select a menu item.");
@@ -428,7 +541,7 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     setNewOrderItems((current) => current.filter((item) => item.id !== id));
   };
 
-  // Create new food order
+  // Create new food order.
   const saveNewOrder = async () => {
     if (!selectedReservation || selectedReservation.status !== "checked_in") {
       toast.error("Please select a checked-in reservation.");
@@ -517,9 +630,15 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     }
   };
 
-  // Save edited food order
+  // Save edited food order.
   const saveEdit = async () => {
     if (!editOrder) return;
+
+    if (editOrder.status !== "pending") {
+      toast.error("Only pending orders can be edited.");
+      setEditOrder(null);
+      return;
+    }
 
     if (editItems.length === 0) {
       toast.error("A food order must contain at least one item.");
@@ -595,12 +714,13 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
           special_instructions: specialInstructions.trim() || null,
         })
         .eq("id", editOrder.id)
+        .eq("status", "pending")
         .select("id");
 
       if (error) throw error;
 
       if (!data?.length) {
-        throw new Error("The food order could not be updated. Refresh and try again.");
+        throw new Error("The food order could not be updated. It may no longer be pending.");
       }
 
       toast.success("Food order updated.");
@@ -616,121 +736,63 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     }
   };
 
-  // List view payment column
-  const paymentDisplay = (order: OrderRow) => {
-    const isUpdating = updatingId === order.id;
+  // Action buttons:
+  // List view: icon-only buttons aligned right.
+  // Grid view: icon + text buttons aligned left.
+  // Details and View Payment are available for all orders.
+  // Edit is only available for Pending orders.
+  const actionDisplay = (order: OrderRow, viewMode: ViewMode = "list") => (
+    <div
+      className={`flex items-center gap-2 ${viewMode === "grid" ? "justify-start" : "justify-end"}`}
+    >
+      {/* View Details */}
+      <Button
+        type="button"
+        size={viewMode === "grid" ? "sm" : "icon"}
+        variant={viewMode === "grid" ? "outline" : "ghost"}
+        className={viewMode === "list" ? "h-8 w-8" : ""}
+        title="View Details"
+        aria-label={`View details for ${order.reference_code}`}
+        onClick={() => setOpen(order)}
+      >
+        <Eye className="h-4 w-4" />
+        {viewMode === "grid" && <span>Details</span>}
+      </Button>
 
-    if (order.status === "cancelled") {
-      return <StatusBadge status="cancelled" />;
-    }
+      {/* View Payment */}
+      <Button
+        type="button"
+        size={viewMode === "grid" ? "sm" : "icon"}
+        variant={viewMode === "grid" ? "outline" : "ghost"}
+        className={viewMode === "list" ? "h-8 w-8" : ""}
+        title="View Payment"
+        aria-label={`View payment for ${order.reference_code}`}
+        onClick={() => viewOrderPayment(order)}
+      >
+        <CreditCard className="h-4 w-4" />
+        {viewMode === "grid" && <span>View Payment</span>}
+      </Button>
 
-    if (order.payment_status === "paid") {
-      return <StatusBadge status="paid" />;
-    }
-
-    return (
-      <div className="flex items-center justify-end gap-2">
+      {/* Edit Order */}
+      {order.status === "pending" && (
         <Button
-          size="sm"
-          className="bg-pink-600 text-white hover:bg-pink-700"
-          disabled={isUpdating}
-          onClick={() => void markPaid(order)}
+          type="button"
+          size={viewMode === "grid" ? "sm" : "icon"}
+          variant={viewMode === "grid" ? "outline" : "ghost"}
+          className={viewMode === "list" ? "h-8 w-8" : ""}
+          title="Edit Order"
+          aria-label={`Edit order ${order.reference_code}`}
+          disabled={updatingId === order.id}
+          onClick={() => startEdit(order)}
         >
-          {isUpdating ? "Updating..." : "Mark Paid"}
+          <Pencil className="h-4 w-4" />
+          {viewMode === "grid" && <span>Edit</span>}
         </Button>
+      )}
+    </div>
+  );
 
-        <Button
-          size="sm"
-          variant="outline"
-          className="border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-          disabled={isUpdating}
-          onClick={() => void cancelOrder(order)}
-        >
-          Cancel
-        </Button>
-      </div>
-    );
-  };
-
-  // Grid top-right: payment actions or payment badge
-  const gridPaymentDisplay = (order: OrderRow) => {
-    const isUpdating = updatingId === order.id;
-
-    if (order.status === "cancelled") {
-      return <StatusBadge status="cancelled" />;
-    }
-
-    if (order.payment_status === "paid") {
-      return <StatusBadge status="paid" />;
-    }
-
-    return (
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-        <Button
-          size="sm"
-          className="bg-pink-600 text-white hover:bg-pink-700"
-          disabled={isUpdating}
-          onClick={() => void markPaid(order)}
-        >
-          {isUpdating ? "Updating..." : "Mark Paid"}
-        </Button>
-
-        <Button
-          size="sm"
-          variant="outline"
-          className="border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-          disabled={isUpdating}
-          onClick={() => void cancelOrder(order)}
-        >
-          Cancel
-        </Button>
-      </div>
-    );
-  };
-
-  // Details and Edit actions
-  const actionDisplay = (order: OrderRow) => {
-    if (view === "list") {
-      return (
-        <div className="flex items-center justify-end gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            title="View details"
-            aria-label="View details"
-            onClick={() => setOpen(order)}
-          >
-            <Eye className="h-4 w-4" />
-          </Button>
-
-          <Button
-            size="icon"
-            variant="ghost"
-            title="Edit order"
-            aria-label="Edit order"
-            onClick={() => startEdit(order)}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={() => setOpen(order)}>
-          <Eye className="mr-1.5 h-4 w-4" />
-          Details
-        </Button>
-
-        <Button size="sm" variant="outline" onClick={() => startEdit(order)}>
-          <Pencil className="mr-1.5 h-4 w-4" />
-          Edit
-        </Button>
-      </div>
-    );
-  };
-
+  // Status is intentionally the last table column.
   const headers = [
     "Order ID",
     "Customer",
@@ -742,7 +804,7 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
     "Total",
     "Submitted",
     "Action",
-    "Payment",
+    "Status",
   ];
 
   return (
@@ -750,15 +812,72 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
       {/* Page heading */}
       <div>
         <h2 className="font-display text-xl font-bold">Food Orders</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Track food orders and manage serving.</p>
+      </div>
 
-        <p className="mt-1 text-sm text-muted-foreground">
-          Review food orders, manage food items, and record food payments.
-        </p>
+      {/* Food Orders Overview */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {/* Total Active Orders */}
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted-foreground">Total Active Orders</p>
+              <p className="mt-2 text-2xl font-bold">{orderOverview.total}</p>
+            </div>
+
+            <div className="rounded-lg bg-primary/10 p-2.5 text-primary">
+              <ShoppingBag className="h-5 w-5" />
+            </div>
+          </div>
+        </div>
+
+        {/* Pending Orders */}
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted-foreground">Pending Orders</p>
+              <p className="mt-2 text-2xl font-bold">{orderOverview.pending}</p>
+            </div>
+
+            <div className="rounded-lg bg-yellow-500/10 p-2.5 text-yellow-500">
+              <Clock3 className="h-5 w-5" />
+            </div>
+          </div>
+        </div>
+
+        {/* Served Orders */}
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted-foreground">Served Orders</p>
+              <p className="mt-2 text-2xl font-bold">{orderOverview.served}</p>
+            </div>
+
+            <div className="rounded-lg bg-green-500/10 p-2.5 text-green-500">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+          </div>
+        </div>
+
+        {/* Cancelled Orders */}
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted-foreground">Cancelled Orders</p>
+              <p className="mt-2 text-2xl font-bold">{orderOverview.cancelled}</p>
+            </div>
+
+            <div className="rounded-lg bg-destructive/10 p-2.5 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <div className="space-y-3 rounded-xl border border-border bg-card p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          {/* Search */}
           <div className="relative min-w-[220px] flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 
@@ -771,15 +890,46 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
             />
           </div>
 
-          <Input
-            id="orders-date"
-            type="date"
-            className={`${dateCls} w-auto min-w-[150px] [color-scheme:white]`}
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-          />
+          {/* Date filters */}
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-full space-y-1 sm:w-[150px]">
+              <Label htmlFor="orders-date-from" className="text-xs text-muted-foreground">
+                From date
+              </Label>
 
-          <Button variant="outline" onClick={() => setFilterOpen(true)}>
+              <Input
+                id="orders-date-from"
+                type="date"
+                className="w-[150px] [color-scheme:dark]"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(event) => setDateFrom(event.target.value)}
+              />
+            </div>
+
+            <div className="w-full space-y-1 sm:w-[150px]">
+              <Label htmlFor="orders-date-to" className="text-xs text-muted-foreground">
+                To date
+              </Label>
+
+              <Input
+                id="orders-date-to"
+                type="date"
+                className="w-[150px] [color-scheme:dark]"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(event) => setDateTo(event.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Filter */}
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 shrink-0"
+            onClick={() => setFilterOpen(true)}
+          >
             <Filter className="mr-2 h-4 w-4" />
             Filter
             {activeFilterCount > 0 && (
@@ -788,10 +938,9 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
               </span>
             )}
           </Button>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
+          {/* Grid / List toggle */}
+          <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
             <Button
               size="sm"
               variant={view === "grid" ? "default" : "ghost"}
@@ -810,7 +959,13 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
               List
             </Button>
           </div>
-          <Button className="w-auto shrink-0" onClick={() => setAddOrderOpen(true)}>
+
+          {/* Add Order */}
+          <Button
+            type="button"
+            className="h-10 shrink-0 border-pink-500 bg-pink-500 text-white hover:border-pink-600 hover:bg-pink-600"
+            onClick={() => setAddOrderOpen(true)}
+          >
             Add Order
           </Button>
         </div>
@@ -826,7 +981,7 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                   <th
                     key={header}
                     className={`p-3 font-medium ${
-                      header === "Payment" || header === "Action" ? "text-right" : ""
+                      header === "Status" || header === "Action" ? "text-right" : ""
                     }`}
                   >
                     {header}
@@ -847,13 +1002,9 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
               {paginatedList.map((order) => (
                 <tr key={order.id} className="border-t border-border hover:bg-secondary/30">
                   <td className="p-3 font-medium">{order.reference_code}</td>
-
                   <td className="p-3">{orderCustomer(order)}</td>
-
                   <td className="p-3">{order.profiles?.phone || "—"}</td>
-
                   <td className="p-3">{order.profiles?.email || "—"}</td>
-
                   <td className="p-3">{order.reservations?.rooms?.name ?? "—"}</td>
 
                   <td className="p-3">
@@ -863,7 +1014,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                   </td>
 
                   <td className="p-3">{totalQuantity(order)}</td>
-
                   <td className="p-3 font-medium">{peso(order.food_subtotal)}</td>
 
                   <td className="p-3 text-muted-foreground">
@@ -872,9 +1022,8 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                       : "—"}
                   </td>
 
-                  <td className="p-3">{actionDisplay(order)}</td>
-
-                  <td className="p-3 text-right">{paymentDisplay(order)}</td>
+                  <td className="p-3">{actionDisplay(order, "list")}</td>
+                  <td className="p-3">{statusControl(order)}</td>
                 </tr>
               ))}
             </tbody>
@@ -892,41 +1041,39 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {paginatedList.map((order) => (
-                <div key={order.id} className="rounded-xl border border-border bg-card p-4">
+                <div
+                  key={order.id}
+                  className="flex flex-col rounded-xl border border-border bg-card p-4"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-semibold">{order.reference_code}</p>
-
                       <p className="mt-1 truncate text-sm text-muted-foreground">
                         {orderCustomer(order)}
                       </p>
                     </div>
 
-                    {gridPaymentDisplay(order)}
+                    <div className="shrink-0">{statusControl(order)}</div>
                   </div>
 
                   <div className="my-4 grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <p className="text-xs text-muted-foreground">Room</p>
-
                       <p className="mt-1 font-medium">{order.reservations?.rooms?.name ?? "—"}</p>
                     </div>
 
                     <div>
                       <p className="text-xs text-muted-foreground">Phone Number</p>
-
                       <p className="mt-1 font-medium">{order.profiles?.phone || "—"}</p>
                     </div>
 
                     <div className="col-span-2">
                       <p className="text-xs text-muted-foreground">Email</p>
-
                       <p className="mt-1 break-all font-medium">{order.profiles?.email || "—"}</p>
                     </div>
 
                     <div>
                       <p className="text-xs text-muted-foreground">Booking date</p>
-
                       <p className="mt-1 font-medium">
                         {order.reservations?.booking_date
                           ? fmtDate(order.reservations.booking_date)
@@ -936,19 +1083,16 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
 
                     <div>
                       <p className="text-xs text-muted-foreground">Items</p>
-
                       <p className="mt-1 font-medium">{totalQuantity(order)}</p>
                     </div>
 
                     <div>
                       <p className="text-xs text-muted-foreground">Total</p>
-
                       <p className="mt-1 font-semibold">{peso(order.food_subtotal)}</p>
                     </div>
 
                     <div>
                       <p className="text-xs text-muted-foreground">Submitted</p>
-
                       <p className="mt-1 font-medium">
                         {order.submitted_at || order.created_at
                           ? fmtDate(order.submitted_at || order.created_at)
@@ -957,8 +1101,8 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 border-t border-border pt-3">
-                    {actionDisplay(order)}
+                  <div className="mt-auto border-t border-border pt-3">
+                    {actionDisplay(order, "grid")}
                   </div>
                 </div>
               ))}
@@ -999,24 +1143,35 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
               <div>
                 <Label htmlFor="new-order-reservation">Select Reservation</Label>
 
-                <select
-                  id="new-order-reservation"
-                  className={selectCls + " mt-1 block w-full"}
+                <Select
                   value={newReservationId}
-                  onChange={(event) => setNewReservationId(event.target.value)}
+                  onValueChange={setNewReservationId}
                   disabled={loadingReservations}
                 >
-                  <option value="">
-                    {loadingReservations ? "Loading reservations..." : "Select a reservation..."}
-                  </option>
+                  <SelectTrigger
+                    id="new-order-reservation"
+                    className="mt-1 h-10 w-full justify-between text-sm"
+                  >
+                    <SelectValue
+                      placeholder={
+                        loadingReservations ? "Loading reservations..." : "Select a reservation..."
+                      }
+                    />
+                  </SelectTrigger>
 
-                  {reservationOptions.map((reservation) => (
-                    <option key={reservation.id} value={reservation.id}>
-                      {reservation.reference_code} · {reservation.customer_name} ·{" "}
-                      {fmtDate(reservation.booking_date)} · Checked In
-                    </option>
-                  ))}
-                </select>
+                  <SelectContent position="popper" className="max-h-60">
+                    {reservationOptions.map((reservation) => (
+                      <SelectItem
+                        key={reservation.id}
+                        value={reservation.id}
+                        className="cursor-pointer"
+                      >
+                        {reservation.reference_code} · {reservation.customer_name} ·{" "}
+                        {fmtDate(reservation.booking_date)} · Checked In
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
                 {!loadingReservations && reservationOptions.length === 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -1029,19 +1184,16 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                 <div className="grid gap-3 rounded-lg border border-border bg-secondary/40 p-3 sm:grid-cols-2">
                   <div>
                     <p className="text-xs text-muted-foreground">Customer</p>
-
                     <p className="mt-1 text-sm font-medium">{selectedReservation.customer_name}</p>
                   </div>
 
                   <div>
                     <p className="text-xs text-muted-foreground">Reservation ID</p>
-
                     <p className="mt-1 text-sm font-medium">{selectedReservation.reference_code}</p>
                   </div>
 
                   <div>
                     <p className="text-xs text-muted-foreground">Booking Date</p>
-
                     <p className="mt-1 text-sm font-medium">
                       {fmtDate(selectedReservation.booking_date)}
                     </p>
@@ -1049,7 +1201,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
 
                   <div>
                     <p className="text-xs text-muted-foreground">Reservation Status</p>
-
                     <p className="mt-1 text-sm font-medium capitalize">
                       {selectedReservation.status.replace("_", " ")}
                     </p>
@@ -1061,21 +1212,21 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
             <section className="space-y-3">
               <h3 className="font-semibold">Food Items</h3>
 
+              {/* Add Food Item dropdown */}
               <div className="flex flex-col gap-2 sm:flex-row">
-                <select
-                  aria-label="Select food item for new order"
-                  className={selectCls + " min-w-0 flex-1"}
-                  value={newSelectedMenuItem}
-                  onChange={(event) => setNewSelectedMenuItem(event.target.value)}
-                >
-                  <option value="">Select a menu item...</option>
+                <Select value={newSelectedMenuItem} onValueChange={setNewSelectedMenuItem}>
+                  <SelectTrigger className="h-10 min-w-0 flex-1 justify-between text-sm">
+                    <SelectValue placeholder="Select a menu item..." />
+                  </SelectTrigger>
 
-                  {availableMenuItems.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} — {peso(item.price)}
-                    </option>
-                  ))}
-                </select>
+                  <SelectContent position="popper" className="max-h-60">
+                    {availableMenuItems.map((item) => (
+                      <SelectItem key={item.id} value={item.id} className="cursor-pointer">
+                        {item.name} — {peso(item.price)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
                 <Button
                   type="button"
@@ -1105,7 +1256,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                       >
                         <div className="min-w-0 flex-1">
                           <p className="font-medium">{item.item_name_snapshot}</p>
-
                           <p className="text-xs text-muted-foreground">
                             {peso(item.unit_price_snapshot)} each
                           </p>
@@ -1209,54 +1359,54 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
           </DialogHeader>
 
           <div className="space-y-4">
-            <div>
+            {/* Order Status */}
+            <div className="space-y-1.5">
               <Label htmlFor="orders-status">Order status</Label>
 
-              <select
-                id="orders-status"
-                className={selectCls + " mt-1 block w-full"}
+              <Select
                 value={status}
-                onChange={(event) => setStatus(event.target.value as "all" | FoStatus)}
+                onValueChange={(value) => setStatus(value as "all" | FoStatus)}
               >
-                <option value="all">All statuses</option>
+                <SelectTrigger id="orders-status" className="h-10 w-full justify-between text-sm">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
 
-                {ORDER_STATUSES.map((item) => (
-                  <option key={item} value={item}>
-                    {STATUS_LABELS[item]}
-                  </option>
-                ))}
-              </select>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className={dropdownItemClass}>
+                    All statuses
+                  </SelectItem>
+
+                  {ORDER_STATUSES.map((item) => (
+                    <SelectItem key={item} value={item} className={dropdownItemClass}>
+                      {STATUS_LABELS[item]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div>
-              <Label htmlFor="orders-payment">Payment</Label>
-
-              <select
-                id="orders-payment"
-                className={selectCls + " mt-1 block w-full"}
-                value={payment}
-                onChange={(event) => setPayment(event.target.value as "all" | PaymentStatus)}
-              >
-                <option value="all">All payments</option>
-                <option value="unpaid">Unpaid</option>
-                <option value="paid">Paid</option>
-              </select>
-            </div>
-
-            <div>
+            {/* Sort By */}
+            <div className="space-y-1.5">
               <Label htmlFor="orders-sort">Sort by</Label>
 
-              <select
-                id="orders-sort"
-                className={selectCls + " mt-1 block w-full"}
-                value={sort}
-                onChange={(event) => setSort(event.target.value as SortMode)}
-              >
-                <option value="submitted">Date submitted</option>
-                <option value="booking">Booking date</option>
-              </select>
+              <Select value={sort} onValueChange={(value) => setSort(value as SortMode)}>
+                <SelectTrigger id="orders-sort" className="h-10 w-full justify-between text-sm">
+                  <SelectValue placeholder="Select sorting" />
+                </SelectTrigger>
+
+                <SelectContent position="popper">
+                  <SelectItem value="submitted" className={dropdownItemClass}>
+                    Date submitted
+                  </SelectItem>
+
+                  <SelectItem value="booking" className={dropdownItemClass}>
+                    Booking date
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
+            {/* Filter Actions */}
             <div className="flex justify-between gap-2 border-t border-border pt-4">
               <Button variant="ghost" onClick={clearFilters}>
                 Clear all
@@ -1285,27 +1435,18 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
               <div className="grid grid-cols-2 gap-4 rounded-xl bg-secondary/50 p-4 sm:grid-cols-3">
                 <div>
                   <p className="text-xs text-muted-foreground">Order ID</p>
-
                   <p className="mt-1 font-semibold">{open.reference_code}</p>
                 </div>
 
                 <div>
-                  <p className="text-xs text-muted-foreground">Payment</p>
-
+                  <p className="text-xs text-muted-foreground">Order Status</p>
                   <div className="mt-1">
-                    {open.status === "cancelled" ? (
-                      <StatusBadge status="cancelled" />
-                    ) : open.payment_status === "paid" ? (
-                      <StatusBadge status="paid" />
-                    ) : (
-                      <span className="text-sm font-medium">Unpaid</span>
-                    )}
+                    <StatusBadge status={open.status} />
                   </div>
                 </div>
 
                 <div>
                   <p className="text-xs text-muted-foreground">Food total</p>
-
                   <p className="mt-1 font-semibold text-primary">{peso(open.food_subtotal)}</p>
                 </div>
               </div>
@@ -1316,19 +1457,16 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                 <div className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2">
                   <div>
                     <p className="text-xs text-muted-foreground">Customer</p>
-
                     <p className="mt-1 text-sm font-medium">{orderCustomer(open)}</p>
                   </div>
 
                   <div>
                     <p className="text-xs text-muted-foreground">Phone Number</p>
-
                     <p className="mt-1 text-sm font-medium">{open.profiles?.phone || "—"}</p>
                   </div>
 
                   <div className="sm:col-span-2">
                     <p className="text-xs text-muted-foreground">Email</p>
-
                     <p className="mt-1 break-all text-sm font-medium">
                       {open.profiles?.email || "—"}
                     </p>
@@ -1342,13 +1480,11 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                 <div className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2">
                   <div>
                     <p className="text-xs text-muted-foreground">Order ID</p>
-
                     <p className="mt-1 text-sm font-medium">{open.reference_code}</p>
                   </div>
 
                   <div>
                     <p className="text-xs text-muted-foreground">Order type</p>
-
                     <p className="mt-1 text-sm font-medium">
                       {open.order_type === "pre_order" ? "Pre-order" : "In-room order"}
                     </p>
@@ -1356,7 +1492,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
 
                   <div>
                     <p className="text-xs text-muted-foreground">Room</p>
-
                     <p className="mt-1 text-sm font-medium">
                       {open.reservations?.rooms
                         ? `${open.reservations.rooms.room_number} · ${open.reservations.rooms.name}`
@@ -1366,7 +1501,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
 
                   <div>
                     <p className="text-xs text-muted-foreground">Reservation ID</p>
-
                     <p className="mt-1 text-sm font-medium">
                       {open.reservations?.reference_code ?? "—"}
                     </p>
@@ -1374,7 +1508,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
 
                   <div>
                     <p className="text-xs text-muted-foreground">Booking date</p>
-
                     <p className="mt-1 text-sm font-medium">
                       {open.reservations?.booking_date
                         ? fmtDate(open.reservations.booking_date)
@@ -1384,7 +1517,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
 
                   <div>
                     <p className="text-xs text-muted-foreground">Submitted</p>
-
                     <p className="mt-1 text-sm font-medium">
                       {formatDateTime(open.submitted_at || open.created_at)}
                     </p>
@@ -1404,7 +1536,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                       >
                         <div>
                           <p className="font-medium">{item.item_name_snapshot}</p>
-
                           <p className="text-xs text-muted-foreground">
                             {item.quantity} × {peso(item.unit_price_snapshot)}
                           </p>
@@ -1418,54 +1549,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                   <div className="flex items-center justify-between border-t border-border bg-secondary/50 p-3 font-semibold">
                     <span>Food subtotal</span>
                     <span className="text-primary">{peso(open.food_subtotal)}</span>
-                  </div>
-                </div>
-              </section>
-
-              <section className="space-y-3">
-                <h3 className="font-semibold">Food Payment Information</h3>
-
-                <div className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Payment status</p>
-
-                    <div className="mt-1">
-                      {open.status === "cancelled" ? (
-                        <StatusBadge status="cancelled" />
-                      ) : open.payment_status === "paid" ? (
-                        <StatusBadge status="paid" />
-                      ) : (
-                        <span className="text-sm font-medium">Unpaid</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-muted-foreground">Payment method</p>
-
-                    <div className="mt-1">
-                      <PaymentMethodBadge method={open.payment_method} />
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-muted-foreground">Payer name</p>
-
-                    <p className="mt-1 text-sm font-medium">{open.payer_name || "—"}</p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-muted-foreground">Account number</p>
-
-                    <p className="mt-1 text-sm font-medium">{open.payer_account_number || "—"}</p>
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <p className="text-xs text-muted-foreground">Payment reference</p>
-
-                    <p className="mt-1 break-all text-sm font-medium">
-                      {open.payment_reference || "—"}
-                    </p>
                   </div>
                 </div>
               </section>
@@ -1488,7 +1571,9 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
       <Dialog
         open={!!editOrder}
         onOpenChange={(isOpen) => {
-          if (!isOpen && !savingEdit) setEditOrder(null);
+          if (!isOpen && !savingEdit) {
+            setEditOrder(null);
+          }
         }}
       >
         {editOrder && (
@@ -1500,28 +1585,27 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
             <div className="space-y-5">
               <div className="rounded-lg bg-secondary/50 p-3">
                 <p className="text-xs text-muted-foreground">Order ID</p>
-
                 <p className="mt-1 font-semibold">{editOrder.reference_code}</p>
               </div>
 
               <section className="space-y-3">
                 <h3 className="font-semibold">Food Items</h3>
 
+                {/* Edit Food Item dropdown */}
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <select
-                    aria-label="Select food item"
-                    className={selectCls + " min-w-0 flex-1"}
-                    value={selectedMenuItem}
-                    onChange={(event) => setSelectedMenuItem(event.target.value)}
-                  >
-                    <option value="">Select a menu item...</option>
+                  <Select value={selectedMenuItem} onValueChange={setSelectedMenuItem}>
+                    <SelectTrigger className="h-10 min-w-0 flex-1 justify-between text-sm">
+                      <SelectValue placeholder="Select a menu item..." />
+                    </SelectTrigger>
 
-                    {availableMenuItems.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name} — {peso(item.price)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectContent position="popper" className="max-h-60">
+                      {availableMenuItems.map((item) => (
+                        <SelectItem key={item.id} value={item.id} className="cursor-pointer">
+                          {item.name} — {peso(item.price)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
                   <Button
                     type="button"
@@ -1529,7 +1613,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                     onClick={addMenuItem}
                     disabled={!selectedMenuItem}
                   >
-                    <Plus className="mr-1.5 h-4 w-4" />
                     Add item
                   </Button>
                 </div>
@@ -1552,7 +1635,6 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                         >
                           <div className="min-w-0 flex-1">
                             <p className="font-medium">{item.item_name_snapshot}</p>
-
                             <p className="text-xs text-muted-foreground">
                               {peso(item.unit_price_snapshot)} each
                             </p>
@@ -1608,6 +1690,58 @@ export function Orders({ orders }: { orders: OrderRow[] }) {
                   Existing items keep their original prices. Newly added items use their current
                   menu prices.
                 </p>
+              </section>
+
+              {/* Payment Information */}
+              <section className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="font-semibold">Payment</h3>
+                </div>
+
+                <div className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Payment Status</p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatPaymentLabel(editOrder.payment_status)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-muted-foreground">Payment Method</p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatPaymentLabel(editOrder.payment_method)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-muted-foreground">Current Saved Food Total</p>
+                    <p className="mt-1 text-sm font-semibold">{peso(editOrder.food_subtotal)}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-muted-foreground">Updated Food Total</p>
+                    <p className="mt-1 text-sm font-semibold text-primary">
+                      {peso(editedSubtotal)}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Payment details are managed in Transactions. Save your food order changes first if
+                  you want the updated total reflected in its transaction.
+                </p>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={() => viewOrderPayment(editOrder)}
+                  disabled={savingEdit}
+                >
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  View Payment
+                </Button>
               </section>
 
               <section className="space-y-2">

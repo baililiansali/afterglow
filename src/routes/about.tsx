@@ -6,12 +6,12 @@ import roomVip from "@/assets/room-vip.jpg";
 export const Route = createFileRoute("/about")({
   head: () => ({
     meta: [
-      { title: "About — Afterglow" },
+      { title: "About — SONARA" },
       {
         name: "description",
-        content: "Afterglow is a private karaoke lounge built for crews who love to sing.",
+        content: "SONARA is a private karaoke lounge built for crews who love to sing.",
       },
-      { property: "og:title", content: "About — Afterglow" },
+      { property: "og:title", content: "About — SONARA" },
       {
         property: "og:description",
         content: "A private karaoke lounge built for crews who love to sing.",
@@ -43,7 +43,7 @@ function About() {
         </div>
         <img
           src={roomVip}
-          alt="Afterglow VIP suite"
+          alt="SONARA VIP suite"
           className="rounded-2xl object-cover"
           loading="lazy"
         />

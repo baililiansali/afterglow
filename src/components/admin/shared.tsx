@@ -69,7 +69,12 @@ export type ResStatus = Database["public"]["Enums"]["reservation_status"];
 
 export type FoStatus = Extract<
   Database["public"]["Enums"]["food_order_status"],
-  "pending" | "confirmed" | "served" | "cancelled"
+  | "pending"
+  | "confirmed"
+  | "preparing"
+  | "ready"
+  | "served"
+  | "cancelled"
 >;
 
 export type ResRow = {

@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dashboard } from "@/components/admin/Dashboard";
@@ -82,10 +83,14 @@ function Admin() {
   const search = Route.useSearch();
   const navigate = useNavigate();
 
-  // The URL determines the active section.
   const section: SectionKey = search.section ?? "dashboard";
 
-  // Update the URL whenever the admin selects a section.
+  // Food order payment target.
+  const [paymentTargetOrderId, setPaymentTargetOrderId] = useState<string | null>(null);
+
+  // Room reservation payment target.
+  const [paymentTargetReservationId, setPaymentTargetReservationId] = useState<string | null>(null);
+
   function handleSectionChange(newSection: SectionKey) {
     navigate({
       to: "/admin",
@@ -95,18 +100,63 @@ function Admin() {
     });
   }
 
-  const panels: Record<SectionKey, React.ReactNode> = {
+  // Food Orders → View Payment.
+  function handleViewPayment(orderId: string) {
+    setPaymentTargetOrderId(orderId);
+    setPaymentTargetReservationId(null);
+
+    navigate({
+      to: "/admin",
+      search: {
+        section: "payments",
+      },
+    });
+  }
+
+  // Room Sessions → View Payment.
+  function handleViewRoomPayment(reservationId: string) {
+    setPaymentTargetReservationId(reservationId);
+    setPaymentTargetOrderId(null);
+
+    navigate({
+      to: "/admin",
+      search: {
+        section: "payments",
+      },
+    });
+  }
+
+  // Clear handled food payment target.
+  function handlePaymentTargetHandled() {
+    setPaymentTargetOrderId(null);
+  }
+
+  // Clear handled room payment target.
+  function handleReservationPaymentTargetHandled() {
+    setPaymentTargetReservationId(null);
+  }
+
+  const panels: Record<SectionKey, ReactNode> = {
     dashboard: <Dashboard res={res} orders={orders} onSection={handleSectionChange} />,
 
     bookings: <Bookings res={res} />,
 
-    sessions: <RoomSessions res={res} />,
+    sessions: <RoomSessions res={res} onViewPayment={handleViewRoomPayment} />,
 
     schedule: <Schedule res={res} />,
 
-    orders: <Orders orders={orders} />,
+    orders: <Orders orders={orders} onViewPayment={handleViewPayment} />,
 
-    payments: <Payments res={res} orders={orders} />,
+    payments: (
+      <Payments
+        res={res}
+        orders={orders}
+        paymentTargetOrderId={paymentTargetOrderId}
+        onPaymentTargetHandled={handlePaymentTargetHandled}
+        paymentTargetReservationId={paymentTargetReservationId}
+        onReservationPaymentTargetHandled={handleReservationPaymentTargetHandled}
+      />
+    ),
 
     rooms: <RoomsAdmin />,
 

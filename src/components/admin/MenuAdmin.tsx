@@ -8,7 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
 import { ImagePicker } from "@/components/ImagePicker";
 import { Pagination } from "@/components/Pagination";
 
@@ -47,8 +55,6 @@ export function MenuAdmin() {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-
-  const selectCls = "h-9 rounded-md border border-input bg-transparent px-3 text-sm";
 
   const activeFilterCount = (cat ? 1 : 0) + (status !== "all" ? 1 : 0);
 
@@ -119,6 +125,11 @@ export function MenuAdmin() {
 
     if (!Number.isFinite(price) || price < 0) {
       toast.error("Please enter a valid price.");
+      return;
+    }
+
+    if (!n.category_id) {
+      toast.error("Please select a category.");
       return;
     }
 
@@ -495,50 +506,61 @@ export function MenuAdmin() {
             <div>
               <Label htmlFor="menu-category-filter">Category</Label>
 
-              <select
-                id="menu-category-filter"
-                className={selectCls + " mt-1 block w-full"}
-                value={cat}
-                onChange={(e) => setCat(e.target.value)}
+              <Select
+                value={cat || "all"}
+                onValueChange={(value) => setCat(value === "all" ? "" : value)}
               >
-                <option value="" className="bg-popover">
-                  All categories
-                </option>
+                <SelectTrigger
+                  id="menu-category-filter"
+                  className="mt-1 h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="All categories" />
+                </SelectTrigger>
 
-                {data?.categories.map((c) => (
-                  <option key={c.id} value={c.id} className="bg-popover">
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className="cursor-pointer">
+                    All categories
+                  </SelectItem>
+
+                  {data?.categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id} className="cursor-pointer">
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* STATUS FILTER */}
             <div>
               <Label htmlFor="menu-status-filter">Status</Label>
 
-              <select
-                id="menu-status-filter"
-                className={selectCls + " mt-1 block w-full"}
-                value={status}
-                onChange={(e) => setStatus(e.target.value as StatusFilter)}
-              >
-                <option value="all" className="bg-popover">
-                  All
-                </option>
+              <Select value={status} onValueChange={(value) => setStatus(value as StatusFilter)}>
+                <SelectTrigger
+                  id="menu-status-filter"
+                  className="mt-1 h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
 
-                <option value="available" className="bg-popover">
-                  Available
-                </option>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className="cursor-pointer">
+                    All
+                  </SelectItem>
 
-                <option value="unavailable" className="bg-popover">
-                  Unavailable
-                </option>
+                  <SelectItem value="available" className="cursor-pointer">
+                    Available
+                  </SelectItem>
 
-                <option value="featured" className="bg-popover">
-                  Featured
-                </option>
-              </select>
+                  <SelectItem value="unavailable" className="cursor-pointer">
+                    Unavailable
+                  </SelectItem>
+
+                  <SelectItem value="featured" className="cursor-pointer">
+                    Featured
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* FILTER ACTIONS */}
@@ -578,23 +600,22 @@ export function MenuAdmin() {
               onChange={(e) => setN({ ...n, price: e.target.value })}
             />
 
-            <select
-              required
-              aria-label="Category"
-              className={selectCls}
+            <Select
               value={n.category_id}
-              onChange={(e) => setN({ ...n, category_id: e.target.value })}
+              onValueChange={(value) => setN({ ...n, category_id: value })}
             >
-              <option value="" className="bg-popover">
-                Category...
-              </option>
+              <SelectTrigger aria-label="Category" className="h-10 w-full justify-between text-sm">
+                <SelectValue placeholder="Category..." />
+              </SelectTrigger>
 
-              {data?.categories.map((c) => (
-                <option key={c.id} value={c.id} className="bg-popover">
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              <SelectContent position="popper" className="max-h-60">
+                {data?.categories.map((c) => (
+                  <SelectItem key={c.id} value={c.id} className="cursor-pointer">
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
             <Textarea
               placeholder="Description"

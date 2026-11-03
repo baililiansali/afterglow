@@ -16,6 +16,13 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { roomsQuery, settingsQuery } from "@/lib/queries";
@@ -52,6 +59,8 @@ const RESERVATION_COLORS: Record<ScheduleReservationStatus, string> = {
   rejected: "border-l-red-500 bg-red-500/10",
   cancelled: "border-l-muted-foreground bg-muted",
 };
+
+const dropdownItemClass = "cursor-pointer";
 
 function getLocalDateString(date: Date) {
   const year = date.getFullYear();
@@ -584,70 +593,115 @@ export function Schedule({ res }: { res: ResRow[] }) {
           </DialogHeader>
 
           <div className="space-y-5">
-            <div className="space-y-2">
+            {/* Room filter */}
+            <div className="space-y-1.5">
               <Label htmlFor="schedule-room-filter">Room</Label>
 
-              <select
-                id="schedule-room-filter"
+              <Select
                 value={roomFilter}
-                onChange={(event) => {
-                  setRoomFilter(event.target.value);
+                onValueChange={(value) => {
+                  setRoomFilter(value);
                   resetPage();
                 }}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
-                <option value="all">All rooms</option>
+                <SelectTrigger
+                  id="schedule-room-filter"
+                  className="h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select room" />
+                </SelectTrigger>
 
-                {rooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.name}
-                    {room.room_number ? ` (${room.room_number})` : ""}
-                  </option>
-                ))}
-              </select>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className={dropdownItemClass}>
+                    All rooms
+                  </SelectItem>
+
+                  {rooms.map((room) => (
+                    <SelectItem key={room.id} value={room.id} className={dropdownItemClass}>
+                      {room.name}
+                      {room.room_number ? ` (${room.room_number})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-2">
+            {/* Room operational status filter */}
+            <div className="space-y-1.5">
               <Label htmlFor="schedule-room-status">Room Operational Status</Label>
 
-              <select
-                id="schedule-room-status"
+              <Select
                 value={roomStatusFilter}
-                onChange={(event) => {
-                  setRoomStatusFilter(event.target.value);
+                onValueChange={(value) => {
+                  setRoomStatusFilter(value);
                   resetPage();
                 }}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
-                <option value="all">All room statuses</option>
-                <option value="available">Available</option>
-                <option value="full">Full</option>
-                <option value="occupied">Occupied</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="inactive">Inactive</option>
-              </select>
+                <SelectTrigger
+                  id="schedule-room-status"
+                  className="h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select room status" />
+                </SelectTrigger>
+
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className={dropdownItemClass}>
+                    All room statuses
+                  </SelectItem>
+
+                  <SelectItem value="available" className={dropdownItemClass}>
+                    Available
+                  </SelectItem>
+
+                  <SelectItem value="full" className={dropdownItemClass}>
+                    Full
+                  </SelectItem>
+
+                  <SelectItem value="occupied" className={dropdownItemClass}>
+                    Occupied
+                  </SelectItem>
+
+                  <SelectItem value="maintenance" className={dropdownItemClass}>
+                    Maintenance
+                  </SelectItem>
+
+                  <SelectItem value="inactive" className={dropdownItemClass}>
+                    Inactive
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-2">
+            {/* Reservation status filter */}
+            <div className="space-y-1.5">
               <Label htmlFor="schedule-reservation-status">Reservation Status</Label>
 
-              <select
-                id="schedule-reservation-status"
+              <Select
                 value={reservationStatusFilter}
-                onChange={(event) => {
-                  setReservationStatusFilter(event.target.value);
+                onValueChange={(value) => {
+                  setReservationStatusFilter(value);
                   resetPage();
                 }}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
-                <option value="all">All reservation statuses</option>
+                <SelectTrigger
+                  id="schedule-reservation-status"
+                  className="h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select reservation status" />
+                </SelectTrigger>
 
-                {RESERVATION_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {status.replace("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())}
-                  </option>
-                ))}
-              </select>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className={dropdownItemClass}>
+                    All reservation statuses
+                  </SelectItem>
+
+                  {RESERVATION_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status} className={dropdownItemClass}>
+                      {status.replace("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="flex justify-between gap-2 border-t border-border pt-4">
@@ -696,9 +750,7 @@ export function Schedule({ res }: { res: ResRow[] }) {
                             <div
                               key={minute}
                               className="absolute top-0 h-full border-l border-border"
-                              style={{
-                                left: `${position}%`,
-                              }}
+                              style={{ left: `${position}%` }}
                             >
                               <span className="absolute left-1 top-3 whitespace-nowrap text-[10px] text-muted-foreground">
                                 {formatMinutes(minute)}
@@ -746,9 +798,7 @@ export function Schedule({ res }: { res: ResRow[] }) {
                                 <div
                                   key={minute}
                                   className="absolute inset-y-0 border-l border-border/60"
-                                  style={{
-                                    left: `${position}%`,
-                                  }}
+                                  style={{ left: `${position}%` }}
                                 />
                               );
                             },
@@ -893,7 +943,6 @@ export function Schedule({ res }: { res: ResRow[] }) {
                   sameDate(weekDate, today) ? "border-primary/50" : ""
                 }`}
               >
-                {/* Only the date header has a hover effect */}
                 <button
                   type="button"
                   onClick={() => {
@@ -971,7 +1020,6 @@ export function Schedule({ res }: { res: ResRow[] }) {
               const dayReservations = getReservationsForDate(monthDate);
 
               const isToday = sameDate(monthDate, today);
-
               const isSelected = sameDate(monthDate, date);
 
               return (

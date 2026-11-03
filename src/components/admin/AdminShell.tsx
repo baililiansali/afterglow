@@ -77,16 +77,14 @@ type Item = { key: SectionKey; title: string; icon: typeof Bell };
 const NAV: { label: string; items: Item[] }[] = [
   {
     label: "OVERVIEW",
-    items: [
-      { key: "dashboard", title: "Dashboard", icon: LayoutDashboard },
-    ],
+    items: [{ key: "dashboard", title: "Dashboard", icon: LayoutDashboard }],
   },
   {
     label: "RESERVATIONS & ROOMS",
     items: [
       { key: "bookings", title: "Reservations", icon: CalendarCheck },
       { key: "schedule", title: "Room Schedule", icon: CalendarClock },
-      { key: "sessions", title: "Room Sessions", icon: CalendarClock },
+      { key: "sessions", title: "Room Sessions", icon: Mic2 },
       { key: "rooms", title: "Rooms", icon: DoorOpen },
     ],
   },
@@ -477,7 +475,8 @@ export function useAdminOrders(): OrderRow[] {
     queryFn: async () => {
       const { data: orders, error } = await supabase
         .from("food_orders")
-        .select(`
+        .select(
+          `
           *,
           food_order_items(*),
           reservations(
@@ -485,7 +484,8 @@ export function useAdminOrders(): OrderRow[] {
             booking_date,
             rooms(name, room_number)
           )
-        `)
+        `,
+        )
         .order("submitted_at", { ascending: false });
 
       if (error) throw error;
@@ -496,12 +496,13 @@ export function useAdminOrders(): OrderRow[] {
         id: string;
         full_name: string | null;
         email: string | null;
+        phone: string | null;
       }[] = [];
 
       if (userIds.length > 0) {
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("id, full_name, email")
+          .select("id, full_name, email, phone")
           .in("id", userIds);
 
         if (profileError) throw profileError;
@@ -515,6 +516,7 @@ export function useAdminOrders(): OrderRow[] {
           {
             full_name: profile.full_name,
             email: profile.email,
+            phone: profile.phone,
           },
         ]),
       );

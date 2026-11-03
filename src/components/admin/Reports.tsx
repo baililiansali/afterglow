@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BarChart3,
   CalendarDays,
   Clock,
   FileSpreadsheet,
+  Filter,
   Music,
   Printer,
   Receipt,
@@ -12,7 +13,10 @@ import {
   TrendingUp,
   Utensils,
   Wallet,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { format, parseISO } from "date-fns";
 
 import { supabase } from "@/integrations/supabase/client";
 import { peso, fmtDate, durationHours } from "@/lib/afterglow";
@@ -21,6 +25,7 @@ import { useProfiles, type ResRow, type OrderRow } from "./shared";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -28,6 +33,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 type ReportsProps = {
   res: ResRow[];
@@ -58,6 +66,7 @@ type FoodItemSummary = {
 };
 
 const BOOKING_STATUSES = ["approved", "checked_in", "completed"];
+const PAGE_SIZE = 10;
 
 function localDate(date: Date) {
   const y = date.getFullYear();
@@ -208,6 +217,60 @@ function DataTable({
   );
 }
 
+function TablePagination({
+  page,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const start = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-muted-foreground">
+        Showing <span className="font-medium text-foreground">{start}</span>–
+        <span className="font-medium text-foreground">{end}</span> of{" "}
+        <span className="font-medium text-foreground">{totalItems}</span> records
+      </p>
+
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          <ChevronLeft className="mr-1 h-4 w-4" />
+          Previous
+        </Button>
+
+        <span className="min-w-[90px] text-center text-sm text-muted-foreground">
+          Page {page} of {totalPages}
+        </span>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+          <ChevronRight className="ml-1 h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function periodKey(dateString: string, period: RevenuePeriod) {
   const date = new Date(`${dateString.slice(0, 10)}T00:00:00`);
   const year = date.getFullYear();
@@ -259,15 +322,7 @@ function periodLabel(key: string, period: RevenuePeriod) {
   })}`;
 }
 
-/**
- * Reads actual food order item information.
- * Does not create fallback names or fabricated quantities.
- */
-function getFoodItemDetails(item: any): {
-  name: string;
-  quantity: number;
-  revenue: number;
-} | null {
+function getFoodItemDetails(item: any): { name: string; quantity: number; revenue: number } | null {
   const nestedFood = item.food_items ?? item.foods ?? item.menu_items ?? null;
 
   const rawName =
@@ -279,7 +334,6 @@ function getFoodItemDetails(item: any): {
     null;
 
   const name = typeof rawName === "string" ? rawName.trim() : "";
-
   const quantity = Number(item.quantity);
 
   if (!name || !Number.isFinite(quantity) || quantity <= 0) {
@@ -287,7 +341,6 @@ function getFoodItemDetails(item: any): {
   }
 
   const subtotal = Number(item.subtotal ?? item.total_price);
-
   const unitPrice = Number(item.unit_price ?? item.price);
 
   let revenue = 0;
@@ -307,12 +360,23 @@ function getFoodItemDetails(item: any): {
 
 export function Reports({ res, orders }: ReportsProps) {
   const [tab, setTab] = useState<Tab>("overview");
+
   const [fromDate, setFromDate] = useState(offsetDate(29));
   const [toDate, setToDate] = useState(localDate(new Date()));
+
   const [selectedRoom, setSelectedRoom] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("all");
+
+  const [draftRoom, setDraftRoom] = useState("all");
+  const [draftStatus, setDraftStatus] = useState("all");
+
+  const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState("");
+
   const [revenuePeriod, setRevenuePeriod] = useState<RevenuePeriod>("daily");
+
+  const [reservationPage, setReservationPage] = useState(1);
+  const [foodOrderPage, setFoodOrderPage] = useState(1);
 
   const profilesQuery = useProfiles();
   const profiles = profilesQuery.data ?? {};
@@ -350,6 +414,11 @@ export function Reports({ res, orders }: ReportsProps) {
   const settings = settingsQuery.data;
   const validRange = fromDate <= toDate;
 
+  useEffect(() => {
+    setReservationPage(1);
+    setFoodOrderPage(1);
+  }, [search, fromDate, toDate, selectedRoom, selectedStatus]);
+
   const dateReservations = useMemo(
     () =>
       validRange ? res.filter((item) => withinRange(item.booking_date, fromDate, toDate)) : [],
@@ -369,7 +438,6 @@ export function Reports({ res, orders }: ReportsProps) {
 
     return dateReservations.filter((item) => {
       const matchesRoom = selectedRoom === "all" || item.room_id === selectedRoom;
-
       const matchesStatus = selectedStatus === "all" || item.status === selectedStatus;
 
       const matchesSearch =
@@ -387,7 +455,6 @@ export function Reports({ res, orders }: ReportsProps) {
 
     return dateOrders.filter((item) => {
       const roomId = item.reservations?.rooms?.id;
-
       const matchesRoom = selectedRoom === "all" || roomId === selectedRoom;
 
       const matchesSearch =
@@ -416,13 +483,10 @@ export function Reports({ res, orders }: ReportsProps) {
   );
 
   const roomRevenue = paidReservations.reduce((sum, item) => sum + Number(item.room_total || 0), 0);
-
   const foodRevenue = paidOrders.reduce((sum, item) => sum + Number(item.food_subtotal || 0), 0);
 
   const totalRevenue = roomRevenue + foodRevenue;
-
   const transactionCount = paidReservations.length + paidOrders.length;
-
   const averageTransaction = transactionCount ? totalRevenue / transactionCount : 0;
 
   const statusCounts = {
@@ -497,17 +561,11 @@ export function Reports({ res, orders }: ReportsProps) {
       if (!date) return;
 
       const key = periodKey(date, revenuePeriod);
-
-      const current = grouped.get(key) ?? {
-        revenue: 0,
-        reservations: 0,
-      };
+      const current = grouped.get(key) ?? { revenue: 0, reservations: 0 };
 
       current.revenue += amount;
 
-      if (isReservation) {
-        current.reservations += 1;
-      }
+      if (isReservation) current.reservations += 1;
 
       grouped.set(key, current);
     };
@@ -548,10 +606,7 @@ export function Reports({ res, orders }: ReportsProps) {
 
         if (!details) return;
 
-        const current = grouped.get(details.name) ?? {
-          quantity: 0,
-          revenue: 0,
-        };
+        const current = grouped.get(details.name) ?? { quantity: 0, revenue: 0 };
 
         current.quantity += details.quantity;
         current.revenue += details.revenue;
@@ -561,10 +616,7 @@ export function Reports({ res, orders }: ReportsProps) {
     });
 
     return [...grouped.entries()]
-      .map(([name, values]) => ({
-        name,
-        ...values,
-      }))
+      .map(([name, values]) => ({ name, ...values }))
       .sort((a, b) => b.quantity - a.quantity);
   }, [paidOrders]);
 
@@ -574,9 +626,22 @@ export function Reports({ res, orders }: ReportsProps) {
     .filter((room) => room.is_active)
     .sort((a, b) => a.bookings - b.bookings)[0];
 
+  const reservationTotalPages = Math.max(1, Math.ceil(filteredReservations.length / PAGE_SIZE));
+  const foodOrderTotalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+
+  const paginatedReservations = filteredReservations.slice(
+    (reservationPage - 1) * PAGE_SIZE,
+    reservationPage * PAGE_SIZE,
+  );
+
+  const paginatedOrders = filteredOrders.slice(
+    (foodOrderPage - 1) * PAGE_SIZE,
+    foodOrderPage * PAGE_SIZE,
+  );
+
   const exportReport = () => {
     const rows: (string | number)[][] = [
-      ["AFTERGLOW - REPORTS & ANALYTICS"],
+      ["SONARA - REPORTS & ANALYTICS"],
       ["Date range", `${fromDate} to ${toDate}`],
       [],
       ["SUMMARY"],
@@ -645,7 +710,7 @@ export function Reports({ res, orders }: ReportsProps) {
       ...foodItems.map((item) => ["Food item", item.name, item.quantity, item.revenue]),
     ];
 
-    exportCSV(`afterglow-report-${fromDate}-to-${toDate}.csv`, rows);
+    exportCSV(`sonara-report-${fromDate}-to-${toDate}.csv`, rows);
   };
 
   const tabs: {
@@ -655,21 +720,14 @@ export function Reports({ res, orders }: ReportsProps) {
   }[] = [
     { id: "overview", label: "Overview", icon: BarChart3 },
     { id: "revenue", label: "Revenue", icon: Wallet },
-    {
-      id: "reservations",
-      label: "Reservations",
-      icon: CalendarDays,
-    },
-    {
-      id: "rooms",
-      label: "Room Performance",
-      icon: Music,
-    },
+    { id: "reservations", label: "Reservations", icon: CalendarDays },
+    { id: "rooms", label: "Room Performance", icon: Music },
     { id: "food", label: "Food Sales", icon: Utensils },
   ];
 
   return (
     <div className="space-y-6">
+      {/* HEADER */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Reports & Analytics</h1>
@@ -691,88 +749,199 @@ export function Reports({ res, orders }: ReportsProps) {
         </div>
       </div>
 
-      {/* Shared filters */}
-      <div className="rounded-xl border bg-card p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <CalendarDays className="h-4 w-4 text-muted-foreground" />
-          <h2 className="font-semibold">Report Filters</h2>
+      {/* SHARED FILTER TOOLBAR */}
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3">
+        {/* SEARCH */}
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Label className="text-xs font-medium text-muted-foreground">Search</Label>
+
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+
+            <Input
+              className="h-10 pl-9 text-sm"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search reference code, customer, or room..."
+            />
+          </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">From date</label>
+        {/* DATE RANGE */}
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
+          {/* From Date */}
+          <div className="min-w-0 space-y-1 sm:w-[150px]">
+            <Label htmlFor="report-from-date" className="text-xs text-muted-foreground">
+              From date
+            </Label>
             <Input
+              id="report-from-date"
               type="date"
+              className="h-10 w-full [color-scheme:dark]"
               value={fromDate}
-              max={toDate}
+              max={toDate || undefined}
               onChange={(event) => setFromDate(event.target.value)}
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">To date</label>
+          {/* To Date */}
+          <div className="min-w-0 space-y-1 sm:w-[150px]">
+            <Label htmlFor="report-to-date" className="text-xs text-muted-foreground">
+              To date
+            </Label>
             <Input
+              id="report-to-date"
               type="date"
+              className="h-10 w-full [color-scheme:dark]"
               value={toDate}
-              min={fromDate}
+              min={fromDate || undefined}
               onChange={(event) => setToDate(event.target.value)}
             />
           </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Room</label>
-            <Select value={selectedRoom} onValueChange={setSelectedRoom}>
-              <SelectTrigger>
-                <SelectValue placeholder="All rooms" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All rooms</SelectItem>
-                {rooms.map((room) => (
-                  <SelectItem key={room.id} value={room.id}>
-                    {room.name} ({room.room_number})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Reservation status</label>
-            <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-              <SelectTrigger>
-                <SelectValue placeholder="All statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="checked_in">Checked in</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
         </div>
 
-        <div className="relative mt-3">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search reference code, customer, or room..."
-          />
+        {/* FILTER BUTTON */}
+        <div className="w-full space-y-1 sm:w-auto">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full sm:w-[130px]"
+            onClick={() => {
+              setDraftRoom(selectedRoom);
+              setDraftStatus(selectedStatus);
+              setFilterOpen(true);
+            }}
+          >
+            <Filter className="mr-2 h-4 w-4" />
+            Filter
+            {(selectedRoom !== "all" || selectedStatus !== "all") && (
+              <span className="ml-2 rounded-full bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground">
+                {(selectedRoom !== "all" ? 1 : 0) + (selectedStatus !== "all" ? 1 : 0)}
+              </span>
+            )}
+          </Button>
         </div>
-
-        {!validRange && (
-          <p className="mt-2 text-sm text-destructive">
-            The start date must be before or equal to the end date.
-          </p>
-        )}
       </div>
 
-      {/* Report tabs */}
+      {!validRange && (
+        <p className="text-sm text-destructive">
+          The start date must be before or equal to the end date.
+        </p>
+      )}
+
+      {/* REPORT FILTER DIALOG */}
+      <Dialog
+        open={filterOpen}
+        onOpenChange={(open) => {
+          setFilterOpen(open);
+
+          if (open) {
+            setDraftRoom(selectedRoom);
+            setDraftStatus(selectedStatus);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Report filters</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* ROOM */}
+            <div className="space-y-1.5">
+              <Label htmlFor="report-room">Room</Label>
+
+              <Select value={draftRoom} onValueChange={setDraftRoom}>
+                <SelectTrigger id="report-room" className="h-10 w-full justify-between text-sm">
+                  <SelectValue placeholder="Select room" />
+                </SelectTrigger>
+
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className="cursor-pointer">
+                    All rooms
+                  </SelectItem>
+
+                  {rooms.map((room) => (
+                    <SelectItem key={room.id} value={room.id} className="cursor-pointer">
+                      {room.name} ({room.room_number})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* RESERVATION STATUS */}
+            <div className="space-y-1.5">
+              <Label htmlFor="report-status">Reservation status</Label>
+
+              <Select value={draftStatus} onValueChange={setDraftStatus}>
+                <SelectTrigger id="report-status" className="h-10 w-full justify-between text-sm">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all" className="cursor-pointer">
+                    All statuses
+                  </SelectItem>
+
+                  <SelectItem value="pending" className="cursor-pointer">
+                    Pending
+                  </SelectItem>
+
+                  <SelectItem value="approved" className="cursor-pointer">
+                    Approved
+                  </SelectItem>
+
+                  <SelectItem value="checked_in" className="cursor-pointer">
+                    Checked in
+                  </SelectItem>
+
+                  <SelectItem value="completed" className="cursor-pointer">
+                    Completed
+                  </SelectItem>
+
+                  <SelectItem value="rejected" className="cursor-pointer">
+                    Rejected
+                  </SelectItem>
+
+                  <SelectItem value="cancelled" className="cursor-pointer">
+                    Cancelled
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* FILTER ACTIONS */}
+            <div className="flex justify-between gap-2 border-t border-border pt-4">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setDraftRoom("all");
+                  setDraftStatus("all");
+                  setSelectedRoom("all");
+                  setSelectedStatus("all");
+                }}
+              >
+                Clear all
+              </Button>
+
+              <Button
+                type="button"
+                onClick={() => {
+                  setSelectedRoom(draftRoom);
+                  setSelectedStatus(draftStatus);
+                  setFilterOpen(false);
+                }}
+              >
+                Apply filters
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* REPORT TABS */}
       <div className="flex gap-2 overflow-x-auto border-b pb-2">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
@@ -801,18 +970,21 @@ export function Reports({ res, orders }: ReportsProps) {
               note="Within selected dates"
               icon={CalendarDays}
             />
+
             <MetricCard
               title="Total Revenue"
               value={peso(totalRevenue)}
               note="Paid room and food transactions"
               icon={Wallet}
             />
+
             <MetricCard
               title="Average Transaction"
               value={peso(averageTransaction)}
               note={`${transactionCount} paid transactions`}
               icon={TrendingUp}
             />
+
             <MetricCard
               title="Room Utilization"
               value={`${utilization.toFixed(1)}%`}
@@ -919,12 +1091,14 @@ export function Reports({ res, orders }: ReportsProps) {
               note="Paid transactions"
               icon={Wallet}
             />
+
             <MetricCard
               title="Room Revenue"
               value={peso(roomRevenue)}
               note="Paid room reservations"
               icon={Music}
             />
+
             <MetricCard
               title="Food Revenue"
               value={peso(foodRevenue)}
@@ -941,14 +1115,23 @@ export function Reports({ res, orders }: ReportsProps) {
                 value={revenuePeriod}
                 onValueChange={(value) => setRevenuePeriod(value as RevenuePeriod)}
               >
-                <SelectTrigger className="w-full sm:w-[160px]">
+                <SelectTrigger className="h-10 w-full justify-between text-sm sm:w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="yearly">Yearly</SelectItem>
+
+                <SelectContent position="popper">
+                  <SelectItem value="daily" className="cursor-pointer">
+                    Daily
+                  </SelectItem>
+                  <SelectItem value="weekly" className="cursor-pointer">
+                    Weekly
+                  </SelectItem>
+                  <SelectItem value="monthly" className="cursor-pointer">
+                    Monthly
+                  </SelectItem>
+                  <SelectItem value="yearly" className="cursor-pointer">
+                    Yearly
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1019,12 +1202,14 @@ export function Reports({ res, orders }: ReportsProps) {
               note="Within selected dates"
               icon={CalendarDays}
             />
+
             <MetricCard
               title="Completed Reservations"
               value={String(statusCounts.completed)}
               note="Marked completed"
               icon={TrendingUp}
             />
+
             <MetricCard
               title="Pending Reservations"
               value={String(statusCounts.pending)}
@@ -1079,7 +1264,7 @@ export function Reports({ res, orders }: ReportsProps) {
                 empty={filteredReservations.length === 0}
                 colSpan={8}
               >
-                {filteredReservations.map((item) => (
+                {paginatedReservations.map((item) => (
                   <tr key={item.id} className="border-b last:border-0">
                     <td className="px-3 py-3 font-medium">{item.reference_code}</td>
                     <td className="px-3 py-3">{customerName(profiles, item.user_id)}</td>
@@ -1101,6 +1286,15 @@ export function Reports({ res, orders }: ReportsProps) {
                 ))}
               </DataTable>
             </div>
+
+            <TablePagination
+              page={reservationPage}
+              totalItems={filteredReservations.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={(page) =>
+                setReservationPage(Math.min(Math.max(1, page), reservationTotalPages))
+              }
+            />
           </div>
         </div>
       )}
@@ -1115,12 +1309,14 @@ export function Reports({ res, orders }: ReportsProps) {
               note="Configured karaoke rooms"
               icon={Music}
             />
+
             <MetricCard
               title="Total Booked Hours"
               value={`${totalBookedHours.toFixed(1)} hrs`}
               note="Approved, checked-in, and completed bookings"
               icon={Clock}
             />
+
             <MetricCard
               title="Overall Utilization"
               value={`${utilization.toFixed(1)}%`}
@@ -1191,12 +1387,14 @@ export function Reports({ res, orders }: ReportsProps) {
               note="Paid food orders"
               icon={Utensils}
             />
+
             <MetricCard
               title="Paid Food Orders"
               value={String(paidOrders.length)}
               note="Non-cancelled paid orders"
               icon={Receipt}
             />
+
             <MetricCard
               title="Food Order Records"
               value={String(filteredOrders.length)}
@@ -1240,7 +1438,7 @@ export function Reports({ res, orders }: ReportsProps) {
                 empty={filteredOrders.length === 0}
                 colSpan={6}
               >
-                {filteredOrders.map((item) => (
+                {paginatedOrders.map((item) => (
                   <tr key={item.id} className="border-b last:border-0">
                     <td className="px-3 py-3 font-medium">{item.reference_code}</td>
                     <td className="px-3 py-3">{customerName(profiles, item.user_id)}</td>
@@ -1258,6 +1456,15 @@ export function Reports({ res, orders }: ReportsProps) {
                 ))}
               </DataTable>
             </div>
+
+            <TablePagination
+              page={foodOrderPage}
+              totalItems={filteredOrders.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={(page) =>
+                setFoodOrderPage(Math.min(Math.max(1, page), foodOrderTotalPages))
+              }
+            />
           </div>
         </div>
       )}
