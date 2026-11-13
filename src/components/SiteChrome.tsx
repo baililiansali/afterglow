@@ -125,7 +125,7 @@ export function Header() {
 
                 {/* Fixed: Use onSelect + navigate instead of <Link> to prevent click swallowing */}
                 <DropdownMenuItem onSelect={() => navigate({ to: "/my-bookings" })}>
-                  <CalendarDays className="mr-2 h-4 w-4" /> My Bookings
+                  <CalendarDays className="mr-2 h-4 w-4" /> My Transactions
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator />

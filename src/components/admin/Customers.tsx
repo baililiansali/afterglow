@@ -485,15 +485,6 @@ export function Customers() {
         />
       </div>
 
-      {/* Customer list heading */}
-      {/* <div>
-        <h3 className="font-display text-lg font-semibold">Customer List</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {filteredCustomers.length} customer
-          {filteredCustomers.length !== 1 ? "s" : ""} found
-        </p>
-      </div> */}
-
       {/* Toolbar */}
       <div className="rounded-xl border border-border bg-card p-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end">

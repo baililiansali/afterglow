@@ -23,6 +23,7 @@ import {
   Settings,
   User,
   Users,
+  UserCog,
   UtensilsCrossed,
   BarChart3,
   ChefHat,
@@ -68,6 +69,7 @@ export type SectionKey =
   | "rooms"
   | "menu"
   | "users"
+  | "staff"
   | "messages"
   | "reports"
   | "settings";
@@ -99,6 +101,7 @@ const NAV: { label: string; items: Item[] }[] = [
     label: "CUSTOMERS & BUSINESS",
     items: [
       { key: "users", title: "Customers", icon: Users },
+      { key: "staff", title: "Staff Management", icon: UserCog },
       { key: "payments", title: "Transactions", icon: CreditCard },
       { key: "reports", title: "Reports & Analytics", icon: BarChart3 },
     ],
@@ -122,6 +125,7 @@ export const SECTION_TITLES: Record<SectionKey, string> = {
   rooms: "Rooms",
   menu: "Food & Beverages",
   users: "Customers",
+  staff: "Staff Management",
   messages: "Messages",
   reports: "Reports & Analytics",
   settings: "Settings",
@@ -229,9 +233,7 @@ function LogoutConfirm() {
 
   useEffect(() => {
     const h = () => setOpen(true);
-
     window.addEventListener("afterglow:logout", h);
-
     return () => window.removeEventListener("afterglow:logout", h);
   }, []);
 
@@ -247,7 +249,6 @@ function LogoutConfirm() {
 
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-
           <AlertDialogAction
             onClick={async () => {
               await supabase.auth.signOut();
@@ -332,9 +333,7 @@ function AdminBell({
   onSection: (s: SectionKey) => void;
 }) {
   const { user } = useAuth();
-
   const idsKey = `ag-admin-notif-read-${user?.id ?? "anon"}`;
-
   const [readIds, setReadIds] = useState<string[]>([]);
 
   useEffect(() => {
@@ -361,7 +360,6 @@ function AdminBell({
         at: r.created_at,
         go: "bookings" as SectionKey,
       })),
-
     ...orders
       .filter((o) => !["served", "cancelled"].includes(o.status))
       .map((o) => ({
@@ -374,13 +372,9 @@ function AdminBell({
   ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
 
   const unread = items.filter((n) => !readIds.includes(n.id)).length;
-
   const markOne = (id: string) => {
-    if (!readIds.includes(id)) {
-      save([...readIds, id]);
-    }
+    if (!readIds.includes(id)) save([...readIds, id]);
   };
-
   const markAll = () => save([...new Set([...readIds, ...items.map((n) => n.id)])]);
 
   return (
@@ -390,7 +384,6 @@ function AdminBell({
         aria-label="Notifications"
       >
         <Bell className="h-5 w-5" />
-
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
             {unread > 9 ? "9+" : unread}
@@ -401,7 +394,6 @@ function AdminBell({
       <DropdownMenuContent align="end" className="w-80">
         <DropdownMenuLabel className="flex items-center justify-between">
           <span>Notifications</span>
-
           {unread > 0 && (
             <button className="text-xs font-normal text-primary hover:underline" onClick={markAll}>
               Mark all as read
@@ -434,7 +426,6 @@ function AdminBell({
                       isNew ? "bg-primary" : "bg-transparent"
                     }`}
                   />
-
                   <div className="min-w-0">
                     <p className="text-sm font-medium">{n.title}</p>
                     <p className="text-xs text-muted-foreground">{n.sub}</p>
@@ -461,7 +452,6 @@ export function useAdminRes(): ResRow[] {
         .order("booking_date", { ascending: false });
 
       if (error) throw error;
-
       return data;
     },
   });
@@ -506,7 +496,6 @@ export function useAdminOrders(): OrderRow[] {
           .in("id", userIds);
 
         if (profileError) throw profileError;
-
         profiles = profileData ?? [];
       }
 

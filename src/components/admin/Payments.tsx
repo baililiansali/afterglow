@@ -135,12 +135,12 @@ export function Payments({
   // Exclude cancelled food orders.
   const validOrders = orders.filter((o) => o.status !== "cancelled");
 
-  // Normalize payment status.
+  // Read the actual payment status from the database.
+  // GCash does NOT automatically mean paid.
   const getPaymentStatus = (
-    paymentMethod: string | null | undefined,
+    _paymentMethod: string | null | undefined,
     paymentStatus: string | null | undefined,
   ): "paid" | "unpaid" => {
-    if (paymentMethod === "gcash") return "paid";
     return paymentStatus === "paid" ? "paid" : "unpaid";
   };
 
@@ -150,6 +150,7 @@ export function Payments({
   };
 
   // Revenue calculations.
+  // Only transactions actually marked as paid are included.
   const roomRevenue = validReservations
     .filter((r) => getPaymentStatus(r.payment_method, r.payment_status) === "paid")
     .reduce((total, r) => total + Number(r.room_total ?? 0), 0);
@@ -199,11 +200,11 @@ export function Payments({
     phone: o.profiles?.phone ?? "",
     room: o.reservations?.rooms?.name ?? "Room",
     roomNumber: o.reservations?.rooms?.room_number ?? "",
-    date: new Date(o.submitted_at).toLocaleString("en-PH", {
+    date: new Date(o.submitted_at ?? o.created_at).toLocaleString("en-PH", {
       dateStyle: "medium",
       timeStyle: "short",
     }),
-    dateValue: new Date(o.submitted_at).toLocaleDateString("en-CA"),
+    dateValue: new Date(o.submitted_at ?? o.created_at).toLocaleDateString("en-CA"),
     amount: Number(o.food_subtotal ?? 0),
     paymentStatus: getPaymentStatus(o.payment_method, o.payment_status),
     paymentMethod: getPaymentMethod(o.payment_method),
@@ -404,10 +405,11 @@ export function Payments({
   };
 
   // Open edit payment dialog.
+  // Preserve the actual payment status regardless of payment method.
   const openEdit = (transaction: TransactionRecord) => {
     setEditingTransaction(transaction);
     setEditMethod(transaction.paymentMethod);
-    setEditStatus(transaction.paymentMethod === "gcash" ? "paid" : transaction.paymentStatus);
+    setEditStatus(transaction.paymentStatus);
   };
 
   // Save payment changes.
@@ -419,12 +421,10 @@ export function Payments({
     try {
       const table = editingTransaction.type === "room" ? "reservations" : "food_orders";
 
-      const finalStatus = editMethod === "gcash" ? "paid" : editStatus;
-
       const { data, error } = await supabase
         .from(table)
         .update({
-          payment_status: finalStatus,
+          payment_status: editStatus,
           payment_method: editMethod,
         })
         .eq("id", editingTransaction.id)
@@ -448,7 +448,7 @@ export function Payments({
     }
   };
 
-  // Mark transaction as paid.
+  // Manually mark a transaction as paid.
   const markAsPaid = async (transaction: TransactionRecord) => {
     setMarkingPaidId(transaction.id);
 
@@ -496,13 +496,18 @@ export function Payments({
     </span>
   );
 
-  // Paid status badge.
-  const PaymentStatusBadge = ({ paymentStatus }: { paymentStatus: "paid" | "unpaid" }) =>
-    paymentStatus === "paid" ? (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-600">
-        Paid
-      </span>
-    ) : null;
+  // Paid and unpaid status badges.
+  const PaymentStatusBadge = ({ paymentStatus }: { paymentStatus: "paid" | "unpaid" }) => (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+        paymentStatus === "paid"
+          ? "bg-emerald-500/10 text-emerald-600"
+          : "bg-muted text-muted-foreground"
+      }`}
+    >
+      {paymentStatus === "paid" ? "Paid" : "Unpaid"}
+    </span>
+  );
 
   // Grid payment display.
   const GridPaymentDisplay = ({ transaction }: { transaction: TransactionRecord }) => {
@@ -804,6 +809,7 @@ export function Payments({
             {/* SEARCH */}
             <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+
               <Input
                 placeholder={
                   activeTab === "room"
@@ -825,6 +831,7 @@ export function Payments({
                 <Label htmlFor="payment-from-date" className="text-xs text-muted-foreground">
                   From date
                 </Label>
+
                 <Input
                   id="payment-from-date"
                   type="date"
@@ -842,6 +849,7 @@ export function Payments({
                 <Label htmlFor="payment-to-date" className="text-xs text-muted-foreground">
                   To date
                 </Label>
+
                 <Input
                   id="payment-to-date"
                   type="date"
@@ -942,9 +950,11 @@ export function Payments({
                     <SelectItem value="all" className="cursor-pointer">
                       All statuses
                     </SelectItem>
+
                     <SelectItem value="paid" className="cursor-pointer">
                       Paid
                     </SelectItem>
+
                     <SelectItem value="unpaid" className="cursor-pointer">
                       Unpaid
                     </SelectItem>
@@ -971,9 +981,11 @@ export function Payments({
                     <SelectItem value="all" className="cursor-pointer">
                       All methods
                     </SelectItem>
+
                     <SelectItem value="cash" className="cursor-pointer">
                       Cash
                     </SelectItem>
+
                     <SelectItem value="gcash" className="cursor-pointer">
                       GCash
                     </SelectItem>
@@ -1122,6 +1134,7 @@ export function Payments({
                       <div className="rounded-xl border border-border bg-card p-4">
                         <div className="mb-3 flex items-center gap-2">
                           <Utensils className="h-4 w-4 text-muted-foreground" />
+
                           <p className="text-sm font-semibold">
                             Order Items ({selectedTransaction.foodItems.length})
                           </p>
@@ -1135,6 +1148,7 @@ export function Payments({
                             >
                               <div className="min-w-0">
                                 <p className="font-medium">{item.name}</p>
+
                                 <p className="mt-1 text-xs text-muted-foreground">
                                   {item.quantity} × {peso(item.unitPrice)}
                                 </p>
@@ -1149,6 +1163,7 @@ export function Payments({
 
                         <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
                           <span className="text-sm font-semibold">Order Total</span>
+
                           <span className="font-display text-lg font-bold">
                             {peso(selectedTransaction.amount)}
                           </span>
@@ -1235,21 +1250,14 @@ export function Payments({
                 </p>
               </div>
 
+              {/* PAYMENT METHOD */}
               <div className="space-y-2">
                 <Label htmlFor="edit-payment-method">Payment Method</Label>
 
                 <select
                   id="edit-payment-method"
                   value={editMethod}
-                  onChange={(e) => {
-                    const value = e.target.value as "cash" | "gcash";
-
-                    setEditMethod(value);
-
-                    if (value === "gcash") {
-                      setEditStatus("paid");
-                    }
-                  }}
+                  onChange={(e) => setEditMethod(e.target.value as "cash" | "gcash")}
                   className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
                   disabled={saving}
                 >
@@ -1258,23 +1266,24 @@ export function Payments({
                 </select>
               </div>
 
+              {/* PAYMENT STATUS */}
               <div className="space-y-2">
                 <Label htmlFor="edit-payment-status">Payment Status</Label>
 
                 <select
                   id="edit-payment-status"
-                  value={editMethod === "gcash" ? "paid" : editStatus}
+                  value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value as "paid" | "unpaid")}
                   className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  disabled={saving || editMethod === "gcash"}
+                  disabled={saving}
                 >
                   <option value="unpaid">Unpaid</option>
                   <option value="paid">Paid</option>
                 </select>
 
-                {editMethod === "gcash" && (
-                  <p className="text-xs font-medium text-emerald-600">
-                    GCash payments are automatically marked as paid.
+                {editMethod === "gcash" && editStatus === "unpaid" && (
+                  <p className="text-xs text-muted-foreground">
+                    Verify the customer's GCash payment before marking this transaction as paid.
                   </p>
                 )}
               </div>

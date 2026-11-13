@@ -12,6 +12,7 @@ import { Payments } from "@/components/admin/Payments";
 import { RoomsAdmin } from "@/components/admin/RoomsAdmin";
 import { MenuAdmin } from "@/components/admin/MenuAdmin";
 import { Customers } from "@/components/admin/Customers";
+import { Staff } from "@/components/admin/Staff";
 import { Messages } from "@/components/admin/Messages";
 import { Reports } from "@/components/admin/Reports";
 import { SettingsAdmin } from "@/components/admin/SettingsAdmin";
@@ -63,9 +64,7 @@ function AdminGate() {
     return (
       <div className="mx-auto max-w-md px-4 py-24 text-center">
         <h1 className="font-display text-2xl font-bold">Admins only</h1>
-
         <p className="mt-2 text-muted-foreground">Sign in with an admin account to continue.</p>
-
         <Button asChild variant="glow" className="mt-6">
           <Link to="/login">Sign in</Link>
         </Button>
@@ -85,10 +84,7 @@ function Admin() {
 
   const section: SectionKey = search.section ?? "dashboard";
 
-  // Food order payment target.
   const [paymentTargetOrderId, setPaymentTargetOrderId] = useState<string | null>(null);
-
-  // Room reservation payment target.
   const [paymentTargetReservationId, setPaymentTargetReservationId] = useState<string | null>(null);
 
   function handleSectionChange(newSection: SectionKey) {
@@ -100,7 +96,6 @@ function Admin() {
     });
   }
 
-  // Food Orders → View Payment.
   function handleViewPayment(orderId: string) {
     setPaymentTargetOrderId(orderId);
     setPaymentTargetReservationId(null);
@@ -113,7 +108,6 @@ function Admin() {
     });
   }
 
-  // Room Sessions → View Payment.
   function handleViewRoomPayment(reservationId: string) {
     setPaymentTargetReservationId(reservationId);
     setPaymentTargetOrderId(null);
@@ -126,12 +120,10 @@ function Admin() {
     });
   }
 
-  // Clear handled food payment target.
   function handlePaymentTargetHandled() {
     setPaymentTargetOrderId(null);
   }
 
-  // Clear handled room payment target.
   function handleReservationPaymentTargetHandled() {
     setPaymentTargetReservationId(null);
   }
@@ -163,6 +155,8 @@ function Admin() {
     menu: <MenuAdmin />,
 
     users: <Customers res={res} />,
+
+    staff: <Staff />,
 
     messages: <Messages />,
 
