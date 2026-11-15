@@ -20,6 +20,7 @@ import { Route as MyBookingsRouteImport } from './routes/my-bookings'
 import { Route as PoliciesRouteImport } from './routes/policies'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as StaffRouteImport } from './routes/staff'
 import { Route as RoomsIndexRouteImport } from './routes/rooms.index'
 import { Route as RoomsRoomIdRouteImport } from './routes/rooms.$roomId'
 
@@ -78,6 +79,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StaffRoute = StaffRouteImport.update({
+  id: '/staff',
+  path: '/staff',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RoomsIndexRoute = RoomsIndexRouteImport.update({
   id: '/rooms/',
   path: '/rooms/',
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/policies': typeof PoliciesRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/staff': typeof StaffRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/rooms/': typeof RoomsIndexRoute
 }
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/policies': typeof PoliciesRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/staff': typeof StaffRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/rooms': typeof RoomsIndexRoute
 }
@@ -132,6 +140,7 @@ export interface FileRoutesById {
   '/policies': typeof PoliciesRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/staff': typeof StaffRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
   '/rooms/': typeof RoomsIndexRoute
 }
@@ -149,6 +158,7 @@ export interface FileRouteTypes {
     | '/policies'
     | '/profile'
     | '/reset-password'
+    | '/staff'
     | '/rooms/$roomId'
     | '/rooms/'
   fileRoutesByTo: FileRoutesByTo
@@ -164,6 +174,7 @@ export interface FileRouteTypes {
     | '/policies'
     | '/profile'
     | '/reset-password'
+    | '/staff'
     | '/rooms/$roomId'
     | '/rooms'
   id:
@@ -179,6 +190,7 @@ export interface FileRouteTypes {
     | '/policies'
     | '/profile'
     | '/reset-password'
+    | '/staff'
     | '/rooms/$roomId'
     | '/rooms/'
   fileRoutesById: FileRoutesById
@@ -195,6 +207,7 @@ export interface RootRouteChildren {
   PoliciesRoute: typeof PoliciesRoute
   ProfileRoute: typeof ProfileRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  StaffRoute: typeof StaffRoute
   RoomsRoomIdRoute: typeof RoomsRoomIdRoute
   RoomsIndexRoute: typeof RoomsIndexRoute
 }
@@ -278,6 +291,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/staff': {
+      id: '/staff'
+      path: '/staff'
+      fullPath: '/staff'
+      preLoaderRoute: typeof StaffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/rooms/': {
       id: '/rooms/'
       path: '/rooms'
@@ -307,6 +327,7 @@ const rootRouteChildren: RootRouteChildren = {
   PoliciesRoute: PoliciesRoute,
   ProfileRoute: ProfileRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  StaffRoute: StaffRoute,
   RoomsRoomIdRoute: RoomsRoomIdRoute,
   RoomsIndexRoute: RoomsIndexRoute,
 }

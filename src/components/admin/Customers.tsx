@@ -504,10 +504,7 @@ export function Customers() {
           {/* Registration date range */}
           <div className="grid grid-cols-2 gap-2 xl:flex">
             <div className="min-w-0 space-y-1 xl:w-[150px]">
-              <Label
-                htmlFor="customer-date-from"
-                className="text-xs text-muted-foreground"
-              >
+              <Label htmlFor="customer-date-from" className="text-xs text-muted-foreground">
                 From date
               </Label>
 
@@ -521,10 +518,7 @@ export function Customers() {
             </div>
 
             <div className="min-w-0 space-y-1 xl:w-[150px]">
-              <Label
-                htmlFor="customer-date-to"
-                className="text-xs text-muted-foreground"
-              >
+              <Label htmlFor="customer-date-to" className="text-xs text-muted-foreground">
                 To date
               </Label>
 
@@ -540,14 +534,9 @@ export function Customers() {
 
           {/* Filter and Grid/List */}
           <div className="flex items-center justify-between gap-3 xl:justify-start">
-            <Button
-              variant="outline"
-              className="h-10"
-              onClick={() => setFilterOpen(true)}
-            >
+            <Button variant="outline" className="h-10" onClick={() => setFilterOpen(true)}>
               <Filter className="mr-2 h-4 w-4" />
               Filter
-
               {activeFilterCount > 0 && (
                 <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
                   {activeFilterCount}

@@ -7,6 +7,7 @@ import {
   Filter,
   Eye,
   Pencil,
+  Trash2,
   LayoutGrid,
   List,
   RefreshCw,
@@ -117,53 +118,42 @@ export function Payments({
   const [pageSize, setPageSize] = useState(10);
 
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionRecord | null>(null);
-
   const [editingTransaction, setEditingTransaction] = useState<TransactionRecord | null>(null);
+  const [deletingTransaction, setDeletingTransaction] = useState<TransactionRecord | null>(null);
 
-  const [editStatus, setEditStatus] = useState<"paid" | "unpaid">("unpaid");
   const [editMethod, setEditMethod] = useState<"cash" | "gcash">("cash");
+  const [editPayerName, setEditPayerName] = useState("");
+  const [editPayerAccount, setEditPayerAccount] = useState("");
+  const [editPaymentReference, setEditPaymentReference] = useState("");
 
   const [saving, setSaving] = useState(false);
-  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
   const [focusedReservationId, setFocusedReservationId] = useState<string | null>(null);
 
-  // Exclude rejected and cancelled reservations.
   const validReservations = res.filter((r) => !["rejected", "cancelled"].includes(r.status));
-
-  // Exclude cancelled food orders.
   const validOrders = orders.filter((o) => o.status !== "cancelled");
 
-  // Read the actual payment status from the database.
-  // GCash does NOT automatically mean paid.
-  const getPaymentStatus = (
-    _paymentMethod: string | null | undefined,
-    paymentStatus: string | null | undefined,
-  ): "paid" | "unpaid" => {
+  const getPaymentStatus = (paymentStatus: string | null | undefined): "paid" | "unpaid" => {
     return paymentStatus === "paid" ? "paid" : "unpaid";
   };
 
-  // Normalize payment method.
   const getPaymentMethod = (paymentMethod: string | null | undefined): "cash" | "gcash" => {
     return paymentMethod === "gcash" ? "gcash" : "cash";
   };
 
-  // Revenue calculations.
-  // Only transactions actually marked as paid are included.
   const roomRevenue = validReservations
-    .filter((r) => getPaymentStatus(r.payment_method, r.payment_status) === "paid")
+    .filter((r) => getPaymentStatus(r.payment_status) === "paid")
     .reduce((total, r) => total + Number(r.room_total ?? 0), 0);
 
   const foodRevenue = validOrders
-    .filter((o) => getPaymentStatus(o.payment_method, o.payment_status) === "paid")
+    .filter((o) => getPaymentStatus(o.payment_status) === "paid")
     .reduce((total, o) => total + Number(o.food_subtotal ?? 0), 0);
 
   const totalRevenue = roomRevenue + foodRevenue;
-
   const normalizedSearch = search.trim().toLowerCase();
 
-  // Room transactions.
   const roomTransactions: TransactionRecord[] = validReservations.map((r) => {
     const profile = profiles[r.user_id];
 
@@ -179,7 +169,7 @@ export function Payments({
       date: fmtDate(r.booking_date),
       dateValue: String(r.booking_date ?? "").slice(0, 10),
       amount: Number(r.room_total ?? 0),
-      paymentStatus: getPaymentStatus(r.payment_method, r.payment_status),
+      paymentStatus: getPaymentStatus(r.payment_status),
       paymentMethod: getPaymentMethod(r.payment_method),
       payerName: r.payer_name ?? "",
       payerAccount: r.payer_account_number ?? "",
@@ -190,7 +180,6 @@ export function Payments({
     };
   });
 
-  // Food transactions.
   const foodTransactions: TransactionRecord[] = validOrders.map((o) => ({
     id: o.id,
     type: "food",
@@ -206,7 +195,7 @@ export function Payments({
     }),
     dateValue: new Date(o.submitted_at ?? o.created_at).toLocaleDateString("en-CA"),
     amount: Number(o.food_subtotal ?? 0),
-    paymentStatus: getPaymentStatus(o.payment_method, o.payment_status),
+    paymentStatus: getPaymentStatus(o.payment_status),
     paymentMethod: getPaymentMethod(o.payment_method),
     payerName: o.payer_name ?? "",
     payerAccount: o.payer_account_number ?? "",
@@ -222,33 +211,21 @@ export function Payments({
     })),
   }));
 
-  // Navigate to a specific food transaction.
   useEffect(() => {
     if (!paymentTargetOrderId) return;
 
     const targetOrder = validOrders.find((order) => order.id === paymentTargetOrderId);
-
     if (!targetOrder) return;
 
     setActiveTab("food");
     setViewMode("list");
     setFocusedOrderId(paymentTargetOrderId);
     setFocusedReservationId(null);
-
-    setStatus("all");
-    setMethod("all");
-    setDraftStatus("all");
-    setDraftMethod("all");
-    setFromDate("");
-    setToDate("");
-    setSearch("");
-    setCurrentPage(1);
+    resetFilters();
     setSelectedTransaction(null);
-
     onPaymentTargetHandled?.();
   }, [paymentTargetOrderId, orders]);
 
-  // Navigate to a specific room reservation payment.
   useEffect(() => {
     if (!paymentTargetReservationId) return;
 
@@ -262,7 +239,12 @@ export function Payments({
     setViewMode("list");
     setFocusedReservationId(paymentTargetReservationId);
     setFocusedOrderId(null);
+    resetFilters();
+    setSelectedTransaction(null);
+    onReservationPaymentTargetHandled?.();
+  }, [paymentTargetReservationId, res]);
 
+  function resetFilters() {
     setStatus("all");
     setMethod("all");
     setDraftStatus("all");
@@ -271,15 +253,10 @@ export function Payments({
     setToDate("");
     setSearch("");
     setCurrentPage(1);
-    setSelectedTransaction(null);
+  }
 
-    onReservationPaymentTargetHandled?.();
-  }, [paymentTargetReservationId, res]);
-
-  // Current transactions based on selected tab.
   const currentTransactions = activeTab === "room" ? roomTransactions : foodTransactions;
 
-  // Search and filter transactions.
   const filteredTransactions = currentTransactions.filter((t) => {
     const matchesFocusedOrder =
       !focusedOrderId || (activeTab === "food" && t.id === focusedOrderId);
@@ -289,7 +266,6 @@ export function Payments({
 
     const matchesStatus = status === "all" || t.paymentStatus === status;
     const matchesMethod = method === "all" || t.paymentMethod === method;
-
     const matchesFromDate = !fromDate || t.dateValue >= fromDate;
     const matchesToDate = !toDate || t.dateValue <= toDate;
 
@@ -323,69 +299,28 @@ export function Payments({
     );
   });
 
-  // Pagination.
   const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
-
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-
-  const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
+  const paginatedTransactions = filteredTransactions.slice(startIndex, startIndex + pageSize);
 
   useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
+    if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
 
-  // Change payment tab.
   const changeTab = (tab: PaymentTab) => {
     setActiveTab(tab);
     setFocusedOrderId(null);
     setFocusedReservationId(null);
-
-    setStatus("all");
-    setMethod("all");
-    setDraftStatus("all");
-    setDraftMethod("all");
-    setFromDate("");
-    setToDate("");
-    setSearch("");
-    setCurrentPage(1);
+    resetFilters();
   };
 
-  const showAllFoodTransactions = () => {
-    setFocusedOrderId(null);
-    setStatus("all");
-    setMethod("all");
-    setDraftStatus("all");
-    setDraftMethod("all");
-    setFromDate("");
-    setToDate("");
-    setSearch("");
-    setCurrentPage(1);
-  };
-
-  const showAllRoomTransactions = () => {
-    setFocusedReservationId(null);
-    setStatus("all");
-    setMethod("all");
-    setDraftStatus("all");
-    setDraftMethod("all");
-    setFromDate("");
-    setToDate("");
-    setSearch("");
-    setCurrentPage(1);
-  };
-
-  // Open filters.
   const openFilters = () => {
     setDraftStatus(status);
     setDraftMethod(method);
     setFilterOpen(true);
   };
 
-  // Apply filters.
   const applyFilters = () => {
     setStatus(draftStatus);
     setMethod(draftMethod);
@@ -393,7 +328,6 @@ export function Payments({
     setFilterOpen(false);
   };
 
-  // Clear filters.
   const clearFilters = () => {
     setStatus("all");
     setMethod("all");
@@ -404,15 +338,14 @@ export function Payments({
     setCurrentPage(1);
   };
 
-  // Open edit payment dialog.
-  // Preserve the actual payment status regardless of payment method.
   const openEdit = (transaction: TransactionRecord) => {
     setEditingTransaction(transaction);
     setEditMethod(transaction.paymentMethod);
-    setEditStatus(transaction.paymentStatus);
+    setEditPayerName(transaction.payerName);
+    setEditPayerAccount(transaction.payerAccount);
+    setEditPaymentReference(transaction.paymentReference);
   };
 
-  // Save payment changes.
   const savePayment = async () => {
     if (!editingTransaction) return;
 
@@ -424,8 +357,10 @@ export function Payments({
       const { data, error } = await supabase
         .from(table)
         .update({
-          payment_status: editStatus,
           payment_method: editMethod,
+          payer_name: editPayerName.trim() || null,
+          payer_account_number: editPayerAccount.trim() || null,
+          payment_reference: editPaymentReference.trim() || null,
         })
         .eq("id", editingTransaction.id)
         .select("id");
@@ -433,14 +368,13 @@ export function Payments({
       if (error) throw error;
 
       if (!data?.length) {
-        throw new Error("Payment details were not updated.");
+        throw new Error("Transaction details were not updated.");
       }
 
-      toast.success("Payment details updated successfully.");
+      toast.success("Transaction updated successfully.");
       setEditingTransaction(null);
 
-      await qc.invalidateQueries({ queryKey: ["admin-res"] });
-      await qc.invalidateQueries({ queryKey: ["admin-orders"] });
+      await refreshTransactions();
     } catch (error) {
       toast.error(errMsg(error));
     } finally {
@@ -448,34 +382,44 @@ export function Payments({
     }
   };
 
-  // Manually mark a transaction as paid.
-  const markAsPaid = async (transaction: TransactionRecord) => {
-    setMarkingPaidId(transaction.id);
+  const deleteTransaction = async () => {
+    if (!deletingTransaction) return;
+
+    setDeleting(true);
 
     try {
-      const table = transaction.type === "room" ? "reservations" : "food_orders";
+      const table = deletingTransaction.type === "room" ? "reservations" : "food_orders";
 
       const { data, error } = await supabase
         .from(table)
-        .update({ payment_status: "paid" })
-        .eq("id", transaction.id)
+        .delete()
+        .eq("id", deletingTransaction.id)
         .select("id");
 
       if (error) throw error;
 
       if (!data?.length) {
-        throw new Error("Payment status was not updated.");
+        throw new Error("Transaction could not be deleted.");
       }
 
-      toast.success("Payment marked as paid.");
+      toast.success("Transaction record deleted successfully.");
 
-      await qc.invalidateQueries({ queryKey: ["admin-res"] });
-      await qc.invalidateQueries({ queryKey: ["admin-orders"] });
+      setDeletingTransaction(null);
+      setSelectedTransaction(null);
+
+      await refreshTransactions();
     } catch (error) {
       toast.error(errMsg(error));
     } finally {
-      setMarkingPaidId(null);
+      setDeleting(false);
     }
+  };
+
+  const refreshTransactions = async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["admin-res"] }),
+      qc.invalidateQueries({ queryKey: ["admin-orders"] }),
+    ]);
   };
 
   const hasActiveFilters = status !== "all" || method !== "all" || !!fromDate || !!toDate;
@@ -483,7 +427,6 @@ export function Payments({
   const activeFilterCount =
     (status !== "all" ? 1 : 0) + (method !== "all" ? 1 : 0) + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
 
-  // Payment method badge.
   const PaymentMethodBadge = ({ paymentMethod }: { paymentMethod: "cash" | "gcash" }) => (
     <span
       className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold ${
@@ -496,7 +439,6 @@ export function Payments({
     </span>
   );
 
-  // Paid and unpaid status badges.
   const PaymentStatusBadge = ({ paymentStatus }: { paymentStatus: "paid" | "unpaid" }) => (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
@@ -509,58 +451,27 @@ export function Payments({
     </span>
   );
 
-  // Grid payment display.
-  const GridPaymentDisplay = ({ transaction }: { transaction: TransactionRecord }) => {
-    const isUpdating = markingPaidId === transaction.id;
-
-    if (transaction.paymentStatus === "paid") {
-      return <PaymentStatusBadge paymentStatus="paid" />;
-    }
-
-    return (
-      <Button
-        type="button"
-        size="sm"
-        className="ml-auto h-8 shrink-0 gap-1.5 px-3 text-xs"
-        disabled={isUpdating}
-        onClick={() => void markAsPaid(transaction)}
-      >
-        {isUpdating && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-        {isUpdating ? "Updating..." : "Mark Paid"}
-      </Button>
-    );
-  };
-
-  // Grid actions.
-  const GridTransactionActions = ({ transaction }: { transaction: TransactionRecord }) => (
-    <div className="flex items-center justify-end gap-2">
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={() => setSelectedTransaction(transaction)}
-      >
-        <Eye className="mr-1.5 h-4 w-4" />
-        Details
-      </Button>
-
-      <Button type="button" size="sm" variant="outline" onClick={() => openEdit(transaction)}>
-        <Pencil className="mr-1.5 h-4 w-4" />
-        Edit
-      </Button>
-    </div>
-  );
-
-  // List actions.
-  const ListTransactionActions = ({ transaction }: { transaction: TransactionRecord }) => (
+  const TransactionActions = ({ transaction }: { transaction: TransactionRecord }) => (
     <div className="flex items-center justify-end gap-1">
       <Button
         type="button"
         size="icon"
         variant="ghost"
+        onClick={() => setSelectedTransaction(transaction)}
+        title="View transaction"
+        aria-label="View transaction"
+        className="text-muted-foreground hover:bg-secondary hover:text-foreground"
+      >
+        <Eye className="h-4 w-4" />
+      </Button>
+
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
         onClick={() => openEdit(transaction)}
-        title="Edit payment"
-        aria-label="Edit payment"
+        title="Edit transaction"
+        aria-label="Edit transaction"
         className="text-muted-foreground hover:bg-secondary hover:text-foreground"
       >
         <Pencil className="h-4 w-4" />
@@ -570,17 +481,16 @@ export function Payments({
         type="button"
         size="icon"
         variant="ghost"
-        onClick={() => setSelectedTransaction(transaction)}
-        title="View details"
-        aria-label="View transaction details"
-        className="text-muted-foreground hover:bg-secondary hover:text-foreground"
+        onClick={() => setDeletingTransaction(transaction)}
+        title="Delete transaction"
+        aria-label="Delete transaction"
+        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
       >
-        <Eye className="h-4 w-4" />
+        <Trash2 className="h-4 w-4" />
       </Button>
     </div>
   );
 
-  // Grid transaction card.
   const renderGridCard = (t: TransactionRecord) => (
     <div
       key={t.id}
@@ -591,8 +501,7 @@ export function Payments({
           <p className="font-semibold">{t.reference}</p>
           <p className="mt-1 truncate text-sm text-muted-foreground">{t.customer}</p>
         </div>
-
-        <GridPaymentDisplay transaction={t} />
+        <PaymentStatusBadge paymentStatus={t.paymentStatus} />
       </div>
 
       <div className="my-4 grid grid-cols-2 gap-4 text-sm">
@@ -630,7 +539,6 @@ export function Payments({
                       {item.quantity} × {peso(item.unitPrice)}
                     </p>
                   </div>
-
                   <p className="shrink-0 font-medium">{peso(item.lineTotal)}</p>
                 </div>
               ))}
@@ -665,13 +573,12 @@ export function Payments({
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-border pt-3">
-        <GridTransactionActions transaction={t} />
+      <div className="flex justify-end border-t border-border pt-3">
+        <TransactionActions transaction={t} />
       </div>
     </div>
   );
 
-  // Table transaction row.
   const renderTableRow = (t: TransactionRecord) => (
     <tr
       key={t.id}
@@ -702,29 +609,15 @@ export function Payments({
       </td>
 
       <td className="p-3">
-        <span className="text-sm font-medium">
-          {t.paymentMethod === "gcash" ? "GCash" : "Cash"}
-        </span>
+        <PaymentMethodBadge paymentMethod={t.paymentMethod} />
       </td>
 
       <td className="p-3">
-        <ListTransactionActions transaction={t} />
+        <PaymentStatusBadge paymentStatus={t.paymentStatus} />
       </td>
 
       <td className="p-3">
-        {t.paymentStatus === "paid" ? (
-          <PaymentStatusBadge paymentStatus="paid" />
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void markAsPaid(t)}
-            disabled={markingPaidId === t.id}
-          >
-            {markingPaidId === t.id && <RefreshCw className="h-4 w-4 animate-spin" />}
-            <span className="ml-2">{markingPaidId === t.id ? "Saving..." : "Mark Paid"}</span>
-          </Button>
-        )}
+        <TransactionActions transaction={t} />
       </td>
     </tr>
   );
@@ -732,11 +625,13 @@ export function Payments({
   return (
     <div className="mt-4 space-y-5 text-foreground">
       {/* PAGE HEADER */}
-      <div>
-        <h1 className="font-display text-xl font-bold">Transactions</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Monitor and manage room reservation and food order payments.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-xl font-bold">Transactions</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage transaction records and monitor business revenue.
+          </p>
+        </div>
       </div>
 
       {/* REVENUE SUMMARY */}
@@ -744,7 +639,7 @@ export function Payments({
         <RevenueCard
           label="Total Collected"
           value={totalRevenue}
-          description="Room and food payments"
+          description="Paid room and food transactions"
           icon={<Wallet className="h-5 w-5" />}
           accent="primary"
         />
@@ -766,295 +661,281 @@ export function Payments({
         />
       </div>
 
-      {/* MAIN TABS */}
-      <div>
-        <div className="flex flex-wrap gap-2 border-b border-border pb-3">
-          <Button
-            type="button"
-            variant={activeTab === "room" ? "default" : "outline"}
-            onClick={() => changeTab("room")}
-          >
-            <Music className="mr-2 h-4 w-4" />
-            Room Payments
-          </Button>
+      {/* TRANSACTION TABS */}
+      <div className="flex flex-wrap gap-2 border-b border-border pb-3">
+        <Button
+          type="button"
+          variant={activeTab === "room" ? "default" : "outline"}
+          onClick={() => changeTab("room")}
+        >
+          <Music className="mr-2 h-4 w-4" />
+          Room Payments
+        </Button>
 
-          <Button
-            type="button"
-            variant={activeTab === "food" ? "default" : "outline"}
-            onClick={() => changeTab("food")}
-          >
-            <Utensils className="mr-2 h-4 w-4" />
-            Food Payments
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant={activeTab === "food" ? "default" : "outline"}
+          onClick={() => changeTab("food")}
+        >
+          <Utensils className="mr-2 h-4 w-4" />
+          Food Payments
+        </Button>
       </div>
 
-      {/* TRANSACTIONS */}
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          {focusedReservationId && activeTab === "room" ? (
-            <Button type="button" variant="outline" size="sm" onClick={showAllRoomTransactions}>
-              Show All Room Transactions
-            </Button>
-          ) : focusedOrderId && activeTab === "food" ? (
-            <Button type="button" variant="outline" size="sm" onClick={showAllFoodTransactions}>
-              Show All Food Transactions
-            </Button>
-          ) : null}
-        </div>
+      {/* FOCUSED TRANSACTION */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {focusedReservationId && activeTab === "room" ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setFocusedReservationId(null);
+              resetFilters();
+            }}
+          >
+            Show All Room Transactions
+          </Button>
+        ) : focusedOrderId && activeTab === "food" ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setFocusedOrderId(null);
+              resetFilters();
+            }}
+          >
+            Show All Food Transactions
+          </Button>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {filteredTransactions.length} transaction
+            {filteredTransactions.length !== 1 ? "s" : ""} found
+          </p>
+        )}
+      </div>
 
-        {/* TOOLBAR */}
-        <div className="rounded-xl border border-border bg-card p-3">
-          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-end">
-            {/* SEARCH */}
-            <div className="relative min-w-0 flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      {/* TOOLBAR */}
+      <div className="rounded-xl border border-border bg-card p-3">
+        <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-end">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder={
+                activeTab === "room"
+                  ? "Search reservation or customer..."
+                  : "Search order, reservation or customer..."
+              }
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="h-10 w-full pl-9"
+            />
+          </div>
 
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
+            <div className="min-w-0 space-y-1 sm:w-[150px]">
+              <Label htmlFor="payment-from-date" className="text-xs text-muted-foreground">
+                From date
+              </Label>
               <Input
-                placeholder={
-                  activeTab === "room"
-                    ? "Search reservation or customer..."
-                    : "Search order, reservation or customer..."
-                }
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+                id="payment-from-date"
+                type="date"
+                className="h-10 w-full [color-scheme:dark]"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={(event) => {
+                  setFromDate(event.target.value);
                   setCurrentPage(1);
                 }}
-                className="h-10 w-full pl-9"
               />
             </div>
 
-            {/* DATE RANGE */}
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
-              <div className="min-w-0 space-y-1 sm:w-[150px]">
-                <Label htmlFor="payment-from-date" className="text-xs text-muted-foreground">
-                  From date
-                </Label>
-
-                <Input
-                  id="payment-from-date"
-                  type="date"
-                  className="h-10 w-full [color-scheme:dark]"
-                  value={fromDate}
-                  max={toDate || undefined}
-                  onChange={(event) => {
-                    setFromDate(event.target.value);
-                    setCurrentPage(1);
-                  }}
-                />
-              </div>
-
-              <div className="min-w-0 space-y-1 sm:w-[150px]">
-                <Label htmlFor="payment-to-date" className="text-xs text-muted-foreground">
-                  To date
-                </Label>
-
-                <Input
-                  id="payment-to-date"
-                  type="date"
-                  className="h-10 w-full [color-scheme:dark]"
-                  value={toDate}
-                  min={fromDate || undefined}
-                  onChange={(event) => {
-                    setToDate(event.target.value);
-                    setCurrentPage(1);
-                  }}
-                />
-              </div>
+            <div className="min-w-0 space-y-1 sm:w-[150px]">
+              <Label htmlFor="payment-to-date" className="text-xs text-muted-foreground">
+                To date
+              </Label>
+              <Input
+                id="payment-to-date"
+                type="date"
+                className="h-10 w-full [color-scheme:dark]"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={(event) => {
+                  setToDate(event.target.value);
+                  setCurrentPage(1);
+                }}
+              />
             </div>
+          </div>
 
-            {/* FILTER AND CLEAR DATE */}
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" className="h-10" onClick={openFilters}>
-                <Filter className="mr-2 h-4 w-4" />
-                Filter
-                {hasActiveFilters && (
-                  <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </Button>
-
-              {(fromDate || toDate) && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-10 whitespace-nowrap text-muted-foreground hover:bg-secondary hover:text-foreground"
-                  onClick={() => {
-                    setFromDate("");
-                    setToDate("");
-                    setCurrentPage(1);
-                  }}
-                >
-                  Clear dates
-                </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" className="h-10" onClick={openFilters}>
+              <Filter className="mr-2 h-4 w-4" />
+              Filter
+              {hasActiveFilters && (
+                <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                  {activeFilterCount}
+                </span>
               )}
-            </div>
+            </Button>
 
-            {/* GRID / LIST TOGGLE */}
-            <div className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
+            {(fromDate || toDate) && (
               <Button
                 type="button"
+                variant="ghost"
                 size="sm"
-                className="h-8"
-                variant={viewMode === "grid" ? "default" : "ghost"}
-                onClick={() => setViewMode("grid")}
+                className="h-10 whitespace-nowrap text-muted-foreground hover:bg-secondary hover:text-foreground"
+                onClick={() => {
+                  setFromDate("");
+                  setToDate("");
+                  setCurrentPage(1);
+                }}
               >
-                <LayoutGrid className="mr-1.5 h-4 w-4" />
-                Grid
+                Clear dates
               </Button>
+            )}
+          </div>
 
-              <Button
-                type="button"
-                size="sm"
-                className="h-8"
-                variant={viewMode === "list" ? "default" : "ghost"}
-                onClick={() => setViewMode("list")}
-              >
-                <List className="mr-1.5 h-4 w-4" />
-                List
-              </Button>
-            </div>
+          <div className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
+            <Button
+              type="button"
+              size="sm"
+              className="h-8"
+              variant={viewMode === "grid" ? "default" : "ghost"}
+              onClick={() => setViewMode("grid")}
+            >
+              <LayoutGrid className="mr-1.5 h-4 w-4" />
+              Grid
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              className="h-8"
+              variant={viewMode === "list" ? "default" : "ghost"}
+              onClick={() => setViewMode("list")}
+            >
+              <List className="mr-1.5 h-4 w-4" />
+              List
+            </Button>
           </div>
         </div>
-
-        {/* FILTER DIALOG */}
-        <Dialog open={filterOpen} onOpenChange={setFilterOpen}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Transaction Filters</DialogTitle>
-              <DialogDescription>
-                Filter transactions by payment status and payment method.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              {/* PAYMENT STATUS */}
-              <div className="space-y-1.5">
-                <Label htmlFor="payment-status-filter">Payment Status</Label>
-
-                <Select
-                  value={draftStatus}
-                  onValueChange={(value) => setDraftStatus(value as PaymentStatus)}
-                >
-                  <SelectTrigger
-                    id="payment-status-filter"
-                    className="h-10 w-full justify-between text-sm"
-                  >
-                    <SelectValue placeholder="Select payment status" />
-                  </SelectTrigger>
-
-                  <SelectContent position="popper" className="max-h-60">
-                    <SelectItem value="all" className="cursor-pointer">
-                      All statuses
-                    </SelectItem>
-
-                    <SelectItem value="paid" className="cursor-pointer">
-                      Paid
-                    </SelectItem>
-
-                    <SelectItem value="unpaid" className="cursor-pointer">
-                      Unpaid
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* PAYMENT METHOD */}
-              <div className="space-y-1.5">
-                <Label htmlFor="payment-method-filter">Payment Method</Label>
-
-                <Select
-                  value={draftMethod}
-                  onValueChange={(value) => setDraftMethod(value as PaymentMethod)}
-                >
-                  <SelectTrigger
-                    id="payment-method-filter"
-                    className="h-10 w-full justify-between text-sm"
-                  >
-                    <SelectValue placeholder="Select payment method" />
-                  </SelectTrigger>
-
-                  <SelectContent position="popper" className="max-h-60">
-                    <SelectItem value="all" className="cursor-pointer">
-                      All methods
-                    </SelectItem>
-
-                    <SelectItem value="cash" className="cursor-pointer">
-                      Cash
-                    </SelectItem>
-
-                    <SelectItem value="gcash" className="cursor-pointer">
-                      GCash
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* ACTIONS */}
-              <div className="flex justify-between gap-2 border-t border-border pt-4">
-                <Button type="button" variant="ghost" onClick={clearFilters}>
-                  Clear all
-                </Button>
-
-                <Button type="button" onClick={applyFilters}>
-                  Apply filters
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* TRANSACTION RECORDS */}
-        {filteredTransactions.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card p-10 text-center text-muted-foreground">
-            <p className="font-medium">No transactions found.</p>
-            <p className="mt-1 text-xs">Try changing your search or filters.</p>
-          </div>
-        ) : viewMode === "grid" ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {paginatedTransactions.map(renderGridCard)}
-          </div>
-        ) : (
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full min-w-[1100px] whitespace-nowrap text-sm">
-              <thead className="bg-secondary/50 text-left text-muted-foreground">
-                <tr>
-                  <th className="p-3 font-medium">Transaction</th>
-                  <th className="p-3 font-medium">Customer</th>
-                  <th className="p-3 font-medium">Room</th>
-                  <th className="p-3 font-medium">Amount / Date</th>
-                  <th className="p-3 font-medium">Method</th>
-                  <th className="p-3 text-right font-medium">Actions</th>
-                  <th className="p-3 font-medium">Status</th>
-                </tr>
-              </thead>
-
-              <tbody>{paginatedTransactions.map(renderTableRow)}</tbody>
-            </table>
-          </div>
-        )}
-
-        {/* PAGINATION */}
-        {filteredTransactions.length > 0 && (
-          <Pagination
-            page={safeCurrentPage}
-            pageSize={pageSize}
-            totalItems={filteredTransactions.length}
-            onPageChange={setCurrentPage}
-            onPageSizeChange={(size) => {
-              setPageSize(size);
-              setCurrentPage(1);
-            }}
-            pageSizeOptions={[5, 10]}
-            itemLabel="transactions"
-          />
-        )}
       </div>
 
-      {/* TRANSACTION DETAILS DIALOG */}
+      {/* FILTER DIALOG */}
+      <Dialog open={filterOpen} onOpenChange={setFilterOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Transaction Filters</DialogTitle>
+            <DialogDescription>
+              Filter transactions by payment status and payment method.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="payment-status-filter">Payment Status</Label>
+              <Select
+                value={draftStatus}
+                onValueChange={(value) => setDraftStatus(value as PaymentStatus)}
+              >
+                <SelectTrigger
+                  id="payment-status-filter"
+                  className="h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select payment status" />
+                </SelectTrigger>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="paid">Paid</SelectItem>
+                  <SelectItem value="unpaid">Unpaid</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="payment-method-filter">Payment Method</Label>
+              <Select
+                value={draftMethod}
+                onValueChange={(value) => setDraftMethod(value as PaymentMethod)}
+              >
+                <SelectTrigger
+                  id="payment-method-filter"
+                  className="h-10 w-full justify-between text-sm"
+                >
+                  <SelectValue placeholder="Select payment method" />
+                </SelectTrigger>
+                <SelectContent position="popper" className="max-h-60">
+                  <SelectItem value="all">All methods</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="gcash">GCash</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex justify-between gap-2 border-t border-border pt-4">
+              <Button type="button" variant="ghost" onClick={clearFilters}>
+                Clear all
+              </Button>
+              <Button type="button" onClick={applyFilters}>
+                Apply filters
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* TRANSACTION RECORDS */}
+      {filteredTransactions.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card p-10 text-center text-muted-foreground">
+          <Wallet className="mx-auto mb-3 h-8 w-8 opacity-50" />
+          <p className="font-medium">No transactions found.</p>
+          <p className="mt-1 text-xs">Try changing your search or filters.</p>
+        </div>
+      ) : viewMode === "grid" ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {paginatedTransactions.map(renderGridCard)}
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full min-w-[1100px] whitespace-nowrap text-sm">
+            <thead className="bg-secondary/50 text-left text-muted-foreground">
+              <tr>
+                <th className="p-3 font-medium">Transaction</th>
+                <th className="p-3 font-medium">Customer</th>
+                <th className="p-3 font-medium">Room</th>
+                <th className="p-3 font-medium">Amount / Date</th>
+                <th className="p-3 font-medium">Method</th>
+                <th className="p-3 font-medium">Status</th>
+                <th className="p-3 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>{paginatedTransactions.map(renderTableRow)}</tbody>
+          </table>
+        </div>
+      )}
+
+      {/* PAGINATION */}
+      {filteredTransactions.length > 0 && (
+        <Pagination
+          page={safeCurrentPage}
+          pageSize={pageSize}
+          totalItems={filteredTransactions.length}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setCurrentPage(1);
+          }}
+          pageSizeOptions={[5, 10]}
+          itemLabel="transactions"
+        />
+      )}
+
+      {/* TRANSACTION DETAILS */}
       <Dialog
         open={!!selectedTransaction}
         onOpenChange={(open) => {
@@ -1066,75 +947,56 @@ export function Payments({
             <>
               <DialogHeader>
                 <DialogTitle>Transaction Details</DialogTitle>
-                <DialogDescription>
-                  Complete payment information for this transaction.
-                </DialogDescription>
+                <DialogDescription>Complete information for this transaction.</DialogDescription>
               </DialogHeader>
 
               <div className="space-y-5 py-3">
-                {/* PAYMENT SUMMARY */}
                 <div className="rounded-xl border border-border bg-secondary/30 p-4">
                   <p className="text-xs text-muted-foreground">Transaction Reference</p>
-
                   <p className="mt-1 font-semibold">{selectedTransaction.reference}</p>
-
                   <p className="mt-3 font-display text-2xl font-bold">
                     {peso(selectedTransaction.amount)}
                   </p>
-
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <PaymentStatusBadge paymentStatus={selectedTransaction.paymentStatus} />
-
                     <PaymentMethodBadge paymentMethod={selectedTransaction.paymentMethod} />
                   </div>
                 </div>
 
-                {/* CUSTOMER INFORMATION */}
                 <section className="space-y-3">
                   <SectionHeading>Customer Information</SectionHeading>
-
                   <DetailRow label="Customer" value={selectedTransaction.customer} />
-
                   <DetailRow label="Email" value={selectedTransaction.email} />
-
                   <DetailRow label="Phone" value={selectedTransaction.phone} />
                 </section>
 
-                {/* RESERVATION OR FOOD ORDER INFORMATION */}
                 <section className="space-y-3">
                   <SectionHeading>
                     {selectedTransaction.type === "room"
                       ? "Reservation Information"
                       : "Food Order Information"}
                   </SectionHeading>
-
                   <DetailRow label="Reference" value={selectedTransaction.reservationReference} />
-
                   <DetailRow
                     label="Room"
                     value={`${selectedTransaction.room} ${
                       selectedTransaction.roomNumber ? `(${selectedTransaction.roomNumber})` : ""
                     }`}
                   />
-
                   <DetailRow
                     label={selectedTransaction.type === "room" ? "Reservation Date" : "Submitted"}
                     value={selectedTransaction.date}
                   />
-
                   <DetailRow label="Record Status" value={selectedTransaction.recordStatus} />
                 </section>
 
-                {/* FOOD ORDERED */}
                 {selectedTransaction.type === "food" && (
                   <section className="space-y-3">
                     <SectionHeading>Food Ordered</SectionHeading>
-
                     {selectedTransaction.foodItems.length > 0 ? (
                       <div className="rounded-xl border border-border bg-card p-4">
                         <div className="mb-3 flex items-center gap-2">
                           <Utensils className="h-4 w-4 text-muted-foreground" />
-
                           <p className="text-sm font-semibold">
                             Order Items ({selectedTransaction.foodItems.length})
                           </p>
@@ -1148,12 +1010,10 @@ export function Payments({
                             >
                               <div className="min-w-0">
                                 <p className="font-medium">{item.name}</p>
-
                                 <p className="mt-1 text-xs text-muted-foreground">
                                   {item.quantity} × {peso(item.unitPrice)}
                                 </p>
                               </div>
-
                               <p className="shrink-0 text-sm font-semibold">
                                 {peso(item.lineTotal)}
                               </p>
@@ -1163,7 +1023,6 @@ export function Payments({
 
                         <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
                           <span className="text-sm font-semibold">Order Total</span>
-
                           <span className="font-display text-lg font-bold">
                             {peso(selectedTransaction.amount)}
                           </span>
@@ -1177,24 +1036,18 @@ export function Payments({
                   </section>
                 )}
 
-                {/* PAYMENT INFORMATION */}
                 <section className="space-y-3">
                   <SectionHeading>Payment Information</SectionHeading>
-
                   <DetailRow
                     label="Payment Method"
                     value={selectedTransaction.paymentMethod === "gcash" ? "GCash" : "Cash"}
                   />
-
                   <DetailRow
                     label="Payment Status"
                     value={selectedTransaction.paymentStatus.toUpperCase()}
                   />
-
                   <DetailRow label="Payer Name" value={selectedTransaction.payerName} />
-
                   <DetailRow label="Payer Account" value={selectedTransaction.payerAccount} />
-
                   <DetailRow
                     label="Payment Reference"
                     value={selectedTransaction.paymentReference}
@@ -1202,16 +1055,17 @@ export function Payments({
                 </section>
               </div>
 
-              <DialogFooter>
+              <DialogFooter className="flex-col gap-2 sm:flex-row">
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="destructive"
                   onClick={() => {
-                    openEdit(selectedTransaction);
+                    setDeletingTransaction(selectedTransaction);
                     setSelectedTransaction(null);
                   }}
                 >
-                  Edit Payment
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
                 </Button>
 
                 <Button type="button" onClick={() => setSelectedTransaction(null)}>
@@ -1223,70 +1077,166 @@ export function Payments({
         </DialogContent>
       </Dialog>
 
-      {/* EDIT PAYMENT DIALOG */}
+      {/* EDIT TRANSACTION */}
       <Dialog
         open={!!editingTransaction}
         onOpenChange={(open) => {
           if (!open && !saving) setEditingTransaction(null);
         }}
       >
-        <DialogContent className="rounded-xl border-border bg-card sm:max-w-lg">
+        <DialogContent className="max-h-[85vh] overflow-y-auto rounded-xl border-border bg-card sm:max-w-xl">
+          {editingTransaction && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Edit Transaction</DialogTitle>
+                <DialogDescription>
+                  Update transaction and payer information. Payment status can only be confirmed by
+                  Staff.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-5 py-3">
+                {/* TRANSACTION SUMMARY */}
+                <div className="rounded-xl border border-border bg-secondary/30 p-4">
+                  <p className="text-xs text-muted-foreground">Transaction Reference</p>
+                  <p className="mt-1 font-semibold">{editingTransaction.reference}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {editingTransaction.customer}
+                  </p>
+                  <p className="mt-3 font-display text-2xl font-bold">
+                    {peso(editingTransaction.amount)}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <PaymentStatusBadge paymentStatus={editingTransaction.paymentStatus} />
+                    <PaymentMethodBadge paymentMethod={editingTransaction.paymentMethod} />
+                  </div>
+                </div>
+
+                {/* TRANSACTION INFORMATION */}
+                <section className="space-y-3">
+                  <SectionHeading>Transaction Information</SectionHeading>
+                  <DetailRow
+                    label="Transaction Type"
+                    value={editingTransaction.type === "room" ? "Room Reservation" : "Food Order"}
+                  />
+                  <DetailRow
+                    label="Reservation Reference"
+                    value={editingTransaction.reservationReference}
+                  />
+                  <DetailRow
+                    label="Room"
+                    value={`${editingTransaction.room} ${
+                      editingTransaction.roomNumber ? `(${editingTransaction.roomNumber})` : ""
+                    }`}
+                  />
+                  <DetailRow
+                    label={editingTransaction.type === "room" ? "Reservation Date" : "Submitted"}
+                    value={editingTransaction.date}
+                  />
+                </section>
+
+                {/* PAYMENT INFORMATION */}
+                <section className="space-y-3">
+                  <SectionHeading>Payment Information</SectionHeading>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-payment-method">Payment Method</Label>
+                    <Select
+                      value={editMethod}
+                      onValueChange={(value) => setEditMethod(value as "cash" | "gcash")}
+                      disabled={saving}
+                    >
+                      <SelectTrigger id="edit-payment-method" className="h-10 w-full">
+                        <SelectValue placeholder="Select payment method" />
+                      </SelectTrigger>
+                      <SelectContent position="popper">
+                        <SelectItem value="cash">Cash</SelectItem>
+                        <SelectItem value="gcash">GCash</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-payer-name">Payer Name</Label>
+                    <Input
+                      id="edit-payer-name"
+                      value={editPayerName}
+                      onChange={(e) => setEditPayerName(e.target.value)}
+                      placeholder="Enter payer name"
+                      disabled={saving}
+                      className="h-10"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-payer-account">Payer Account Number</Label>
+                    <Input
+                      id="edit-payer-account"
+                      value={editPayerAccount}
+                      onChange={(e) => setEditPayerAccount(e.target.value)}
+                      placeholder="Enter account number"
+                      disabled={saving}
+                      className="h-10"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-payment-reference">Payment Reference</Label>
+                    <Input
+                      id="edit-payment-reference"
+                      value={editPaymentReference}
+                      onChange={(e) => setEditPaymentReference(e.target.value)}
+                      placeholder="Enter payment reference"
+                      disabled={saving}
+                      className="h-10"
+                    />
+                  </div>
+                </section>
+              </div>
+
+              <DialogFooter className="flex-col gap-2 border-t border-border pt-4 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingTransaction(null)}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
+                <Button type="button" onClick={() => void savePayment()} disabled={saving}>
+                  {saving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+                  {saving ? "Saving..." : "Save Changes"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* DELETE CONFIRMATION */}
+      <Dialog
+        open={!!deletingTransaction}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeletingTransaction(null);
+        }}
+      >
+        <DialogContent className="rounded-xl border-border bg-card sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Edit Payment</DialogTitle>
-            <DialogDescription>Update the payment status and payment method.</DialogDescription>
+            <DialogTitle>Delete Transaction?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete the associated{" "}
+              {deletingTransaction?.type === "room" ? "reservation" : "food order"} record, not just
+              hide it from this page.
+            </DialogDescription>
           </DialogHeader>
 
-          {editingTransaction && (
-            <div className="space-y-5 py-3">
-              <div className="rounded-xl border border-border bg-secondary/30 p-4">
-                <p className="text-xs text-muted-foreground">Transaction Reference</p>
-
-                <p className="mt-1 font-semibold">{editingTransaction.reference}</p>
-
-                <p className="mt-1 text-sm text-muted-foreground">{editingTransaction.customer}</p>
-
-                <p className="mt-2 font-display text-xl font-bold">
-                  {peso(editingTransaction.amount)}
-                </p>
-              </div>
-
-              {/* PAYMENT METHOD */}
-              <div className="space-y-2">
-                <Label htmlFor="edit-payment-method">Payment Method</Label>
-
-                <select
-                  id="edit-payment-method"
-                  value={editMethod}
-                  onChange={(e) => setEditMethod(e.target.value as "cash" | "gcash")}
-                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  disabled={saving}
-                >
-                  <option value="cash">Cash</option>
-                  <option value="gcash">GCash</option>
-                </select>
-              </div>
-
-              {/* PAYMENT STATUS */}
-              <div className="space-y-2">
-                <Label htmlFor="edit-payment-status">Payment Status</Label>
-
-                <select
-                  id="edit-payment-status"
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value as "paid" | "unpaid")}
-                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  disabled={saving}
-                >
-                  <option value="unpaid">Unpaid</option>
-                  <option value="paid">Paid</option>
-                </select>
-
-                {editMethod === "gcash" && editStatus === "unpaid" && (
-                  <p className="text-xs text-muted-foreground">
-                    Verify the customer's GCash payment before marking this transaction as paid.
-                  </p>
-                )}
-              </div>
+          {deletingTransaction && (
+            <div className="rounded-lg border border-border bg-secondary/30 p-4">
+              <p className="font-semibold">{deletingTransaction.reference}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{deletingTransaction.customer}</p>
+              <p className="mt-2 font-display text-xl font-bold">
+                {peso(deletingTransaction.amount)}
+              </p>
             </div>
           )}
 
@@ -1294,15 +1244,19 @@ export function Payments({
             <Button
               type="button"
               variant="outline"
-              onClick={() => setEditingTransaction(null)}
-              disabled={saving}
+              onClick={() => setDeletingTransaction(null)}
+              disabled={deleting}
             >
               Cancel
             </Button>
-
-            <Button type="button" onClick={() => void savePayment()} disabled={saving}>
-              {saving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
-              {saving ? "Saving..." : "Save Changes"}
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void deleteTransaction()}
+              disabled={deleting}
+            >
+              {deleting && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting ? "Deleting..." : "Delete Transaction"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1337,12 +1291,9 @@ function RevenueCard({
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">{label}</p>
-
           <p className="mt-2 font-display text-2xl font-bold tabular-nums">{peso(value)}</p>
-
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
-
         <div className={`rounded-lg p-3 ${accentStyles[accent]}`}>{icon}</div>
       </div>
     </div>
@@ -1361,7 +1312,6 @@ function DetailRow({ label, value }: { label: string; value: string | null | und
   return (
     <div className="flex flex-col gap-1 border-b border-border pb-2 sm:flex-row sm:justify-between">
       <span className="text-sm text-muted-foreground">{label}</span>
-
       <span className="break-all text-sm font-medium sm:text-right">{value || "—"}</span>
     </div>
   );

@@ -1,34 +1,139 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  ArrowRight,
-  CalendarCheck,
-  CalendarDays,
-  Clock,
-  DoorClosed,
-  DoorOpen,
-  Wallet,
-} from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/StatusBadge";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowRight, Wallet, TrendingUp, Receipt } from "lucide-react";
+import type { ReactNode } from "react";
+
 import { supabase } from "@/integrations/supabase/client";
-import { errMsg, fmtDate, fmtTime, peso } from "@/lib/afterglow";
+import { fmtDate, peso } from "@/lib/afterglow";
 import { useAuth } from "@/lib/auth";
 import { useMyProfile } from "@/lib/avatar";
-import { roomsQuery, settingsQuery } from "@/lib/queries";
 import type { SectionKey } from "./AdminShell";
-import { useProfiles, type OrderRow, type ResRow, type ResStatus } from "./shared";
+import type { OrderRow, ResRow } from "./shared";
 
-type RoomState = "available" | "reserved" | "occupied" | "maintenance";
-
-const ROOM_STYLE: Record<RoomState, { label: string; cls: string }> = {
-  available: { label: "Available", cls: "border-border text-muted-foreground" },
-  reserved: { label: "Reserved", cls: "border-accent/60 text-accent" },
-  occupied: { label: "Occupied", cls: "border-primary/70 text-primary" },
-  maintenance: { label: "Maintenance", cls: "border-destructive/60 text-destructive" },
+type FinancialDay = {
+  date: string;
+  label: string;
+  value: number;
 };
+
+type ExpenseRow = {
+  category: string;
+  amount: number | string;
+  expense_date: string;
+};
+
+function getLastSevenDays(today: string) {
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(`${today}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() - (6 - index));
+
+    const dateKey = date.toISOString().slice(0, 10);
+
+    return {
+      date: dateKey,
+      label: new Date(`${dateKey}T00:00:00`).toLocaleDateString("en-PH", {
+        weekday: "short",
+      }),
+    };
+  });
+}
+
+function FinancialChart({
+  title,
+  description,
+  data,
+  variant,
+}: {
+  title: string;
+  description: string;
+  data: FinancialDay[];
+  variant: "revenue" | "profit";
+}) {
+  const maxValue = Math.max(1, ...data.map((item) => Math.abs(item.value)));
+  const isProfit = variant === "profit";
+
+  return (
+    <Panel title={title}>
+      <p className="mb-5 text-xs text-muted-foreground">{description}</p>
+
+      <div className="grid grid-cols-7 gap-2">
+        {data.map((item) => {
+          const isNegative = item.value < 0;
+
+          const height = Math.max(
+            item.value === 0 ? 0 : 4,
+            (Math.abs(item.value) / maxValue) * (isProfit ? 42 : 100),
+          );
+
+          const barColor = isProfit ? (isNegative ? "bg-destructive" : "bg-glow") : "bg-primary";
+
+          return (
+            <div key={item.date} className="flex min-w-0 flex-col items-center gap-2">
+              <span
+                className={`w-full truncate text-center text-[10px] font-medium ${
+                  isProfit && isNegative
+                    ? "text-destructive"
+                    : isProfit
+                      ? "text-glow"
+                      : "text-primary"
+                }`}
+                title={peso(item.value)}
+              >
+                {peso(item.value)}
+              </span>
+
+              {isProfit ? (
+                <div className="relative h-32 w-full">
+                  <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-border" />
+
+                  {item.value !== 0 && (
+                    <div
+                      className={`absolute left-1/2 w-3/5 -translate-x-1/2 rounded-sm ${barColor}`}
+                      style={
+                        isNegative
+                          ? {
+                              top: "50%",
+                              height: `${height}%`,
+                            }
+                          : {
+                              bottom: "50%",
+                              height: `${height}%`,
+                            }
+                      }
+                    />
+                  )}
+                </div>
+              ) : (
+                <div className="flex h-32 w-full items-end justify-center">
+                  <div
+                    className={`w-3/5 rounded-t-md ${barColor}`}
+                    style={{
+                      height: `${height}%`,
+                      minHeight: item.value > 0 ? 4 : 0,
+                    }}
+                  />
+                </div>
+              )}
+
+              <span className="text-[10px] text-muted-foreground">{item.label}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+        <span className={`h-2.5 w-2.5 rounded-sm ${isProfit ? "bg-glow" : "bg-primary"}`} />
+        {isProfit ? "Daily profit" : "Daily revenue"}
+
+        {isProfit && (
+          <>
+            <span className="ml-3 h-2.5 w-2.5 rounded-sm bg-destructive" />
+            Negative profit
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
 
 export function Dashboard({
   res,
@@ -39,145 +144,154 @@ export function Dashboard({
   orders: OrderRow[];
   onSection: (s: SectionKey) => void;
 }) {
-  const qc = useQueryClient();
   const { user } = useAuth();
+
   const profile = useMyProfile(user?.id) as unknown as
     { data?: { full_name?: string | null } } | undefined;
-  const { data: profiles = {} } = useProfiles();
-  const { data: rooms = [] } = useQuery(roomsQuery);
-  const { data: settings } = useQuery(settingsQuery);
-  const [openRoom, setOpenRoom] = useState<{ name: string; room_number: string } | null>(null);
 
-  // Manila local time (UTC+8)
+  // Manila local date (UTC+8).
   const manila = new Date(Date.now() + 8 * 3600 * 1000).toISOString();
   const today = manila.slice(0, 10);
-  const nowTime = manila.slice(11, 16);
 
-  const pending = res.filter((r) => r.status === "pending");
-  const todays = res.filter(
-    (r) => r.booking_date === today && !["cancelled", "rejected"].includes(r.status),
-  );
-  const inRoom = res.filter((r) => r.status === "checked_in");
-  const upcoming = res
-    .filter((r) => r.status === "approved" && r.booking_date >= today)
-    .sort((a, b) => (a.booking_date + a.start_time).localeCompare(b.booking_date + b.start_time));
-  const recent = res.slice(0, 8);
+  // Fetch saved business expenses for financial calculations.
+  const { data: expenses = [] } = useQuery({
+    queryKey: ["admin-expenses"],
+    queryFn: async (): Promise<ExpenseRow[]> => {
+      const { data, error } = await supabase
+        .from("business_expenses")
+        .select("category, amount, expense_date")
+        .order("expense_date", { ascending: false });
 
-  // Room availability
-  const roomState = (room: {
-    id?: string;
-    room_number: string;
-    is_active?: boolean;
-    maintenance_status?: boolean;
-  }): { state: RoomState; r?: ResRow } => {
-    if (room.maintenance_status || room.is_active === false) return { state: "maintenance" };
-    const occ = inRoom.find((r) => r.rooms?.room_number === room.room_number);
-    if (occ) return { state: "occupied", r: occ };
-    const next = todays.find(
-      (r) =>
-        r.status === "approved" &&
-        r.rooms?.room_number === room.room_number &&
-        r.end_time.slice(0, 5) > nowTime,
-    );
-    if (next) return { state: "reserved", r: next };
-    return { state: "available" };
-  };
+      if (error) throw error;
 
-  const roomStates = rooms.map((room) => ({ room, ...roomState(room as never) }));
-  const occupiedCount = roomStates.filter((x) => x.state === "occupied").length;
-  const availableCount = roomStates.filter((x) => x.state === "available").length;
+      return (data ?? []) as ExpenseRow[];
+    },
+  });
 
-  // Today's revenue: recorded payments only (paid bookings today + served food today)
+  // Today's revenue from paid room reservations.
   const todayRoomRevenue = res
     .filter((r) => r.booking_date === today && r.payment_status === "paid")
-    .reduce((s, r) => s + Number(r.room_total), 0);
+    .reduce((sum, r) => sum + Number(r.room_total), 0);
 
+  // Today's revenue from paid food orders linked to today's reservations.
   const todayFoodRevenue = orders
-    .filter((o) => o.status === "served" && o.reservations?.booking_date === today)
-    .reduce((s, o) => s + Number(o.food_subtotal), 0);
+    .filter((o) => o.payment_status === "paid" && o.reservations?.booking_date === today)
+    .reduce((sum, o) => sum + Number(o.food_subtotal), 0);
 
   const todayRevenue = todayRoomRevenue + todayFoodRevenue;
 
-  // Last 7 days chart
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(Date.parse(today) - (6 - i) * 86400000).toISOString().slice(0, 10);
-    return { d, n: res.filter((r) => r.booking_date === d).length };
+  // Total revenue from paid room reservations.
+  const totalRoomRevenue = res
+    .filter((r) => r.payment_status === "paid")
+    .reduce((sum, r) => sum + Number(r.room_total), 0);
+
+  // Total revenue from paid food orders.
+  const totalFoodRevenue = orders
+    .filter((o) => o.payment_status === "paid")
+    .reduce((sum, o) => sum + Number(o.food_subtotal), 0);
+
+  const totalRevenue = totalRoomRevenue + totalFoodRevenue;
+
+  // Only Salary, Maintenance, and Damages count toward dashboard expenses.
+  // Damages are included in Maintenance and counted exactly once.
+  const includedExpenses = expenses.filter(
+    (expense) =>
+      expense.category === "salary" ||
+      expense.category === "maintenance" ||
+      expense.category === "damage",
+  );
+
+  const totalExpenses = includedExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+
+  // Total profit = total revenue - included expenses.
+  const totalProfit = totalRevenue - totalExpenses;
+
+  // Last seven days for financial charts.
+  const chartDays = getLastSevenDays(today);
+
+  // Daily revenue from paid room reservations and food orders.
+  const revenueTrend: FinancialDay[] = chartDays.map((day) => {
+    const roomRevenue = res
+      .filter((r) => r.booking_date === day.date && r.payment_status === "paid")
+      .reduce((sum, r) => sum + Number(r.room_total), 0);
+
+    const foodRevenue = orders
+      .filter((o) => o.payment_status === "paid" && o.reservations?.booking_date === day.date)
+      .reduce((sum, o) => sum + Number(o.food_subtotal), 0);
+
+    return {
+      date: day.date,
+      label: day.label,
+      value: roomRevenue + foodRevenue,
+    };
   });
+
+  // Daily profit = daily revenue - Salary, Maintenance, and Damages.
+  const profitTrend: FinancialDay[] = chartDays.map((day, index) => {
+    const dailyExpenses = expenses
+      .filter(
+        (expense) =>
+          expense.expense_date === day.date &&
+          ["salary", "maintenance", "damage"].includes(expense.category),
+      )
+      .reduce((sum, expense) => sum + Number(expense.amount), 0);
+
+    return {
+      date: day.date,
+      label: day.label,
+      value: revenueTrend[index].value - dailyExpenses,
+    };
+  });
+
+  // Reservation activity for the last seven days.
+  const days = chartDays.map((day) => ({
+    d: day.date,
+    n: res.filter((r) => r.booking_date === day.date).length,
+  }));
 
   const maxDay = Math.max(1, ...days.map((x) => x.n));
 
   const firstName =
     (profile?.data?.full_name ?? "").split(" ")[0] || user?.email?.split("@")[0] || "there";
 
-  const setStatus = async (id: string, status: ResStatus) => {
-    const { data, error } = await supabase
-      .from("reservations")
-      .update({ status })
-      .eq("id", id)
-      .select("id");
-
-    if (error) return void toast.error(errMsg(error));
-
-    if (!data?.length)
-      return void toast.error("That change didn't go through — refresh and try again.");
-
-    toast.success(status === "approved" ? "Booking approved" : "Booking rejected");
-    qc.invalidateQueries({ queryKey: ["admin-res"] });
-  };
-
-  // Summary cards (display-only)
   const stats = [
-    {
-      l: "Total reservations",
-      v: res.length,
-      sub: "All bookings",
-      icon: CalendarDays,
-      tone: "text-primary",
-    },
-    {
-      l: "Today's reservations",
-      v: todays.length,
-      sub: "Scheduled today",
-      icon: CalendarCheck,
-      tone: "text-primary",
-    },
-    {
-      l: "Pending reservations",
-      v: pending.length,
-      sub: "Awaiting approval",
-      icon: Clock,
-      tone: "text-accent",
-    },
-    {
-      l: "Available rooms",
-      v: availableCount,
-      sub: `of ${rooms.length} rooms`,
-      icon: DoorOpen,
-      tone: "text-glow",
-    },
-    {
-      l: "Occupied rooms",
-      v: occupiedCount,
-      sub: "In use now",
-      icon: DoorClosed,
-      tone: "text-primary",
-    },
     {
       l: "Today's revenue",
       v: peso(todayRevenue),
-      sub: "Payments collected",
+      sub: "Payments collected today",
       icon: Wallet,
       tone: "text-accent",
     },
+    {
+      l: "Total revenue",
+      v: peso(totalRevenue),
+      sub: "All paid bookings and orders",
+      icon: TrendingUp,
+      tone: "text-primary",
+    },
+    {
+      l: "Total expenses",
+      v: peso(totalExpenses),
+      sub: "Salary, maintenance and damages",
+      icon: Receipt,
+      tone: "text-destructive",
+    },
+    {
+      l: "Total profit",
+      v: peso(totalProfit),
+      sub: "Revenue minus expenses",
+      icon: TrendingUp,
+      tone: totalProfit >= 0 ? "text-glow" : "text-destructive",
+    },
   ];
-
-  const name = (uid: string) => profiles[uid]?.full_name || "Guest";
 
   return (
     <div className="space-y-6">
+      {/* Dashboard heading */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="font-display text-3xl font-bold">Hello, {firstName}</h2>
+
           <p className="text-sm text-muted-foreground">
             Here's what's happening at SONARA right now.
           </p>
@@ -188,108 +302,66 @@ export function Dashboard({
         </span>
       </div>
 
-      {/* 1. Summary cards - display only, not clickable */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      {/* Financial summary cards */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
         {stats.map((s) => (
           <div key={s.l} className="rounded-2xl border border-border bg-card p-4">
             <div className="flex items-start justify-between gap-2">
               <p className="text-xs font-medium text-muted-foreground">{s.l}</p>
+
               <span className={`rounded-lg bg-secondary p-1.5 ${s.tone}`}>
                 <s.icon className="h-4 w-4" />
               </span>
             </div>
 
             <p className="mt-3 font-display text-2xl font-bold">{s.v}</p>
+
             <p className={`mt-1 text-xs ${s.tone}`}>{s.sub}</p>
           </div>
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
-          {/* Pending approvals */}
-          <Panel
-            title="Pending approvals"
-            action={() => onSection("bookings")}
-            actionLabel="All reservations"
-          >
-            {pending.length === 0 && <Empty>No bookings waiting for review.</Empty>}
+      {/* Financial and reservation charts */}
+      <div className="grid gap-6 xl:grid-cols-2">
+        {/* Left column: Revenue and Profit charts */}
+        <div className="grid content-start gap-6">
+          <FinancialChart
+            title="Revenue Trend · last 7 days"
+            description="Daily collected revenue from paid room reservations and food orders."
+            data={revenueTrend}
+            variant="revenue"
+          />
 
-            {pending.slice(0, 5).map((r) => (
-              <div
-                key={r.id}
-                data-testid="dash-pending"
-                className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/40 p-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">
-                    {name(r.user_id)} · {r.rooms?.name ?? "Room"}
-                  </p>
-
-                  <p className="text-xs text-muted-foreground">
-                    {r.reference_code} · {fmtDate(r.booking_date)} · {fmtTime(r.start_time)}–
-                    {fmtTime(r.end_time)} · {r.guest_count} guests · {peso(r.room_total)}
-                  </p>
-                </div>
-
-                <Button size="sm" variant="glow" onClick={() => setStatus(r.id, "approved")}>
-                  Approve
-                </Button>
-
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-red-300 text-red-600 hover:border-red-400 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
-                  onClick={() => setStatus(r.id, "rejected")}
-                >
-                  Reject
-                </Button>
-              </div>
-            ))}
-          </Panel>
-
-          {/* 2. Recent reservations */}
-          <Panel
-            title="Recent reservations"
-            action={() => onSection("bookings")}
-            actionLabel="View details"
-          >
-            <ResTable rows={recent} name={name} empty="No reservations yet." />
-          </Panel>
-
-          {/* 3. Upcoming reservations */}
-          <Panel
-            title="Upcoming reservations"
-            action={() => onSection("schedule")}
-            actionLabel="Room schedule"
-          >
-            <ResTable
-              rows={upcoming.slice(0, 8)}
-              name={name}
-              empty="No confirmed upcoming bookings."
-            />
-          </Panel>
+          <FinancialChart
+            title="Profit Trend · last 7 days"
+            description="Daily revenue minus Salary, Maintenance, and Damages recorded for each day."
+            data={profitTrend}
+            variant="profit"
+          />
         </div>
 
-        <div className="space-y-6">
-          {/* 5. Reservation overview chart */}
+        {/* Right column: Reservations and Transactions */}
+        <div className="grid content-start gap-6">
           <Panel
             title="Reservations · last 7 days"
             action={() => onSection("reports")}
             actionLabel="Reports"
           >
-            <div className="flex h-40 items-end gap-2">
+            <div className="flex h-48 items-end gap-2">
               {days.map((x) => (
                 <div key={x.d} className="flex flex-1 flex-col items-center gap-1">
                   <span className="text-xs font-semibold">{x.n}</span>
 
                   <div
                     className="w-full rounded-t-md bg-primary"
-                    style={{ height: `${(x.n / maxDay) * 100}%`, minHeight: 4 }}
+                    style={{
+                      height: `${(x.n / maxDay) * 100}%`,
+                      minHeight: 4,
+                    }}
                   />
 
                   <span className="text-[10px] text-muted-foreground">
-                    {new Date(x.d + "T00:00:00").toLocaleDateString("en-US", {
+                    {new Date(`${x.d}T00:00:00`).toLocaleDateString("en-US", {
                       weekday: "short",
                     })}
                   </span>
@@ -298,205 +370,33 @@ export function Dashboard({
             </div>
           </Panel>
 
-          {/* 4. Room availability overview */}
-          <Panel
-            title="Room availability"
-            action={() => onSection("schedule")}
-            actionLabel="Room Schedule"
-          >
-            <div className="mb-2 flex flex-wrap gap-3 text-xs">
-              {(Object.keys(ROOM_STYLE) as RoomState[]).map((k) => (
-                <span key={k} className={ROOM_STYLE[k].cls.split(" ")[1]}>
-                  ● {ROOM_STYLE[k].label}
-                </span>
-              ))}
+          {/* Transactions shortcut */}
+          <Panel title="Transactions">
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 p-3">
+              <div className="rounded-lg bg-secondary p-2 text-primary">
+                <Receipt className="h-5 w-5" />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Manage transactions</p>
+
+                <p className="text-xs text-muted-foreground">
+                  View payments and financial records.
+                </p>
+              </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-2">
-              {roomStates.map(({ room, state, r }) => (
-                <button
-                  type="button"
-                  onClick={() => setOpenRoom(room)}
-                  key={room.room_number}
-                  title={`${room.name} — ${ROOM_STYLE[state].label}${r ? ` (${fmtTime(r.start_time)}–${fmtTime(r.end_time)})` : ""}`}
-                  className={`rounded-lg border bg-background/40 p-2 text-center transition hover:border-primary ${ROOM_STYLE[state].cls}`}
-                >
-                  <p className="font-display text-sm font-bold">{room.room_number}</p>
-
-                  <p className="truncate text-[10px]">
-                    {r ? `til ${fmtTime(r.end_time)}` : ROOM_STYLE[state].label}
-                  </p>
-                </button>
-              ))}
-            </div>
-
-            <p className="text-[11px] text-muted-foreground">
-              Tap a room to see today's full schedule.
-            </p>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-md border border-input bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+              onClick={() => onSection("payments")}
+            >
+              Go to Transactions
+              <ArrowRight className="h-4 w-4" />
+            </button>
           </Panel>
         </div>
       </div>
-
-      <Dialog open={!!openRoom} onOpenChange={(o) => !o && setOpenRoom(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{openRoom?.name} · Today's schedule</DialogTitle>
-          </DialogHeader>
-
-          {openRoom && (
-            <RoomDay
-              rows={todays.filter((r) => r.rooms?.room_number === openRoom.room_number)}
-              open={settings?.opening_time?.slice(0, 5) ?? "12:00"}
-              close={settings?.closing_time?.slice(0, 5) ?? "24:00"}
-              nowTime={nowTime}
-              name={name}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
-
-const toT = (m: number) =>
-  `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-
-const hrs = (m: number) => `${+(m / 60).toFixed(1)} hr${m === 60 ? "" : "s"}`;
-
-function RoomDay({
-  rows,
-  open,
-  close,
-  nowTime,
-  name,
-}: {
-  rows: ResRow[];
-  open: string;
-  close: string;
-  nowTime: string;
-  name: (uid: string) => string;
-}) {
-  const o = toMin(open);
-  let c = toMin(close);
-
-  if (c <= o) c += 24 * 60;
-
-  const now = toMin(nowTime);
-  const sorted = [...rows].sort((a, b) => a.start_time.localeCompare(b.start_time));
-
-  type Item =
-    { kind: "gap"; s: number; e: number } | { kind: "res"; r: ResRow; s: number; e: number };
-
-  const items: Item[] = [];
-  let cur = o;
-
-  for (const r of sorted) {
-    const s = toMin(r.start_time);
-    let e = toMin(r.end_time);
-
-    if (e <= s) e += 24 * 60;
-
-    if (s > cur) items.push({ kind: "gap", s: cur, e: s });
-
-    items.push({ kind: "res", r, s, e });
-    cur = Math.max(cur, e);
-  }
-
-  if (cur < c) items.push({ kind: "gap", s: cur, e: c });
-
-  const label = (it: Extract<Item, { kind: "res" }>) => {
-    if (it.r.status === "checked_in")
-      return { t: "In room now", cls: "border-primary/70 text-primary" };
-
-    if (it.r.status === "completed" || it.e <= now)
-      return { t: "Finished", cls: "border-border text-muted-foreground" };
-
-    if (it.r.status === "pending")
-      return { t: "Pending approval", cls: "border-accent/60 text-accent" };
-
-    return { t: "Reserved", cls: "border-accent/60 text-accent" };
-  };
-
-  return (
-    <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">
-        Open {fmtTime(open)} – {fmtTime(close)}
-      </p>
-
-      {items.map((it, i) =>
-        it.kind === "gap" ? (
-          it.e <= now ? null : (
-            <div
-              key={i}
-              className="rounded-xl border border-dashed border-glow/50 p-3 text-sm text-glow"
-            >
-              Open {fmtTime(toT(Math.max(it.s, now)))} – {fmtTime(toT(it.e))} ·{" "}
-              {hrs(it.e - Math.max(it.s, now))} free
-            </div>
-          )
-        ) : (
-          <div
-            key={i}
-            className={`rounded-xl border bg-background/40 p-3 text-sm ${label(it).cls}`}
-          >
-            <p className="font-medium">
-              {fmtTime(it.r.start_time)} – {fmtTime(it.r.end_time)} · {label(it).t}
-            </p>
-
-            <p className="text-xs text-muted-foreground">
-              {it.r.reference_code} · {name(it.r.user_id)} · {it.r.guest_count} guests
-            </p>
-          </div>
-        ),
-      )}
-    </div>
-  );
-}
-
-function ResTable({
-  rows,
-  name,
-  empty,
-}: {
-  rows: ResRow[];
-  name: (uid: string) => string;
-  empty: string;
-}) {
-  if (rows.length === 0) return <Empty>{empty}</Empty>;
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-xs text-muted-foreground">
-            <th className="py-2 pr-3 font-medium">Reservation ID</th>
-            <th className="py-2 pr-3 font-medium">Customer</th>
-            <th className="py-2 pr-3 font-medium">Room</th>
-            <th className="py-2 pr-3 font-medium">Date</th>
-            <th className="py-2 pr-3 font-medium">Time</th>
-            <th className="py-2 font-medium">Status</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} className="border-b border-border/50 last:border-0">
-              <td className="py-2 pr-3 font-mono text-xs">{r.reference_code}</td>
-              <td className="py-2 pr-3">{name(r.user_id)}</td>
-              <td className="py-2 pr-3">{r.rooms?.name ?? "—"}</td>
-              <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(r.booking_date)}</td>
-              <td className="py-2 pr-3 whitespace-nowrap">
-                {fmtTime(r.start_time)}–{fmtTime(r.end_time)}
-              </td>
-              <td className="py-2">
-                <StatusBadge status={r.status} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -508,7 +408,7 @@ function Panel({
   actionLabel,
 }: {
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
   action?: () => void;
   actionLabel?: string;
 }) {
@@ -523,20 +423,13 @@ function Panel({
             onClick={action}
             className="flex items-center gap-1 text-xs text-primary hover:underline"
           >
-            {actionLabel} <ArrowRight className="h-3 w-3" />
+            {actionLabel}
+            <ArrowRight className="h-3 w-3" />
           </button>
         )}
       </div>
 
       <div className="space-y-2">{children}</div>
     </section>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="rounded-xl border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-      {children}
-    </p>
   );
 }

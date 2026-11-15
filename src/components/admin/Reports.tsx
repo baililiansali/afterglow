@@ -16,7 +16,17 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
 
 import { supabase } from "@/integrations/supabase/client";
 import { peso, fmtDate, durationHours } from "@/lib/afterglow";
@@ -34,8 +44,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 type ReportsProps = {
   res: ResRow[];
@@ -65,8 +73,15 @@ type FoodItemSummary = {
   revenue: number;
 };
 
+type HourlyOccupancy = {
+  hour: number;
+  label: string;
+  totalOccupied: number;
+  averageOccupied: number;
+};
+
 const BOOKING_STATUSES = ["approved", "checked_in", "completed"];
-const PAGE_SIZE = 10;
+const CHART_LIMIT = 5;
 
 function localDate(date: Date) {
   const y = date.getFullYear();
@@ -105,15 +120,27 @@ function hoursBetween(start: string, end: string) {
 function operatingHours(opening?: string | null, closing?: string | null) {
   if (!opening || !closing) return 0;
 
-  const [oh, om] = opening.split(":").map(Number);
-  const [ch, cm] = closing.split(":").map(Number);
-
-  const start = oh * 60 + (om || 0);
-  let end = ch * 60 + (cm || 0);
+  const start = timeToMinutes(opening);
+  let end = timeToMinutes(closing);
 
   if (end <= start) end += 24 * 60;
 
   return (end - start) / 60;
+}
+
+function timeToMinutes(value: string) {
+  const [hours, minutes] = value.slice(0, 5).split(":").map(Number);
+
+  return (hours || 0) * 60 + (minutes || 0);
+}
+
+function formatHour(hour: number) {
+  const date = new Date(2000, 0, 1, hour, 0, 0);
+
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    hour12: true,
+  });
 }
 
 function exportCSV(filename: string, rows: (string | number)[][]) {
@@ -222,50 +249,82 @@ function TablePagination({
   totalItems,
   pageSize,
   onPageChange,
+  onPageSizeChange,
 }: {
   page: number;
   totalItems: number;
   pageSize: number;
   onPageChange: (page: number) => void;
+  onPageSizeChange?: (size: number) => void;
 }) {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+
   const start = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+
   const end = Math.min(page * pageSize, totalItems);
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm text-muted-foreground">
-        Showing <span className="font-medium text-foreground">{start}</span>–
-        <span className="font-medium text-foreground">{end}</span> of{" "}
-        <span className="font-medium text-foreground">{totalItems}</span> records
-      </p>
+    <div className="flex flex-col gap-4 border-t border-border pt-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <p className="text-sm text-muted-foreground">
+            Showing <span className="font-medium text-foreground">{start}</span>–
+            <span className="font-medium text-foreground">{end}</span> of{" "}
+            <span className="font-medium text-foreground">{totalItems}</span> records
+          </p>
 
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={page <= 1}
-          onClick={() => onPageChange(page - 1)}
-        >
-          <ChevronLeft className="mr-1 h-4 w-4" />
-          Previous
-        </Button>
+          {onPageSizeChange && (
+            <div className="flex items-center gap-2">
+              <Label className="whitespace-nowrap text-xs text-muted-foreground">
+                Rows per page
+              </Label>
 
-        <span className="min-w-[90px] text-center text-sm text-muted-foreground">
-          Page {page} of {totalPages}
-        </span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(value) => onPageSizeChange(Number(value))}
+              >
+                <SelectTrigger className="h-8 w-[75px]">
+                  <SelectValue />
+                </SelectTrigger>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={page >= totalPages}
-          onClick={() => onPageChange(page + 1)}
-        >
-          Next
-          <ChevronRight className="ml-1 h-4 w-4" />
-        </Button>
+                <SelectContent>
+                  <SelectItem value="5">5</SelectItem>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => onPageChange(page - 1)}
+          >
+            <ChevronLeft className="mr-1 h-4 w-4" />
+            Previous
+          </Button>
+
+          <span className="min-w-[90px] text-center text-sm text-muted-foreground">
+            Page {page} of {totalPages}
+          </span>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={page >= totalPages}
+            onClick={() => onPageChange(page + 1)}
+          >
+            Next
+            <ChevronRight className="ml-1 h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -322,40 +381,230 @@ function periodLabel(key: string, period: RevenuePeriod) {
   })}`;
 }
 
-function getFoodItemDetails(item: any): { name: string; quantity: number; revenue: number } | null {
-  const nestedFood = item.food_items ?? item.foods ?? item.menu_items ?? null;
+function getFoodItemDetails(item: any): FoodItemSummary | null {
+  const name = typeof item.item_name_snapshot === "string" ? item.item_name_snapshot.trim() : "";
 
-  const rawName =
-    item.food_name ??
-    item.item_name ??
-    item.name ??
-    nestedFood?.name ??
-    nestedFood?.food_name ??
-    null;
-
-  const name = typeof rawName === "string" ? rawName.trim() : "";
   const quantity = Number(item.quantity);
+  const unitPrice = Number(item.unit_price_snapshot);
+  const lineTotal = Number(item.line_total);
 
   if (!name || !Number.isFinite(quantity) || quantity <= 0) {
     return null;
   }
 
-  const subtotal = Number(item.subtotal ?? item.total_price);
-  const unitPrice = Number(item.unit_price ?? item.price);
-
-  let revenue = 0;
-
-  if (Number.isFinite(subtotal)) {
-    revenue = subtotal;
-  } else if (Number.isFinite(unitPrice)) {
-    revenue = unitPrice * quantity;
-  }
+  const revenue = Number.isFinite(lineTotal)
+    ? lineTotal
+    : Number.isFinite(unitPrice)
+      ? unitPrice * quantity
+      : 0;
 
   return {
     name,
     quantity,
     revenue: Math.max(0, revenue),
   };
+}
+
+/* HORIZONTAL RANKING BAR CHART */
+function RankedBarChart({
+  title,
+  description,
+  items,
+  valueLabel,
+  formatValue,
+  emptyMessage,
+}: {
+  title: string;
+  description: string;
+  items: {
+    name: string;
+    value: number;
+    subtitle?: string;
+  }[];
+  valueLabel: string;
+  formatValue?: (value: number) => string;
+  emptyMessage: string;
+}) {
+  const chartData = [...items].reverse();
+
+  return (
+    <div className="rounded-xl border bg-card p-5">
+      <SectionHeading title={title} description={description} />
+
+      {items.length === 0 ? (
+        <p className="py-10 text-center text-sm text-muted-foreground">{emptyMessage}</p>
+      ) : (
+        <div className="mt-5 h-[280px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{
+                top: 5,
+                right: 20,
+                left: 10,
+                bottom: 5,
+              }}
+            >
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
+
+              <XAxis
+                type="number"
+                allowDecimals={false}
+                tick={{
+                  fill: "var(--muted-foreground)",
+                  fontSize: 11,
+                }}
+                axisLine={false}
+                tickLine={false}
+              />
+
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={110}
+                tick={{
+                  fill: "var(--muted-foreground)",
+                  fontSize: 11,
+                }}
+                axisLine={false}
+                tickLine={false}
+              />
+
+              <Tooltip
+                cursor={{
+                  fill: "var(--muted)",
+                  opacity: 0.4,
+                }}
+                formatter={(value) => [
+                  formatValue ? formatValue(Number(value)) : Number(value).toLocaleString(),
+                  valueLabel,
+                ]}
+                contentStyle={{
+                  backgroundColor: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "10px",
+                  color: "var(--foreground)",
+                }}
+              />
+
+              <Bar dataKey="value" fill="var(--primary)" radius={[0, 5, 5, 0]} barSize={22} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ROOM OCCUPANCY COLUMN CHART */
+function HourlyOccupancyChart({
+  data,
+  peakHour,
+  configuredHours,
+}: {
+  data: HourlyOccupancy[];
+  peakHour: HourlyOccupancy | undefined;
+  configuredHours: boolean;
+}) {
+  return (
+    <div className="rounded-xl border bg-card p-5">
+      <SectionHeading
+        title="Room Occupancy by Hour"
+        description="Average number of rooms occupied during each hour across the selected dates"
+      />
+
+      {!configuredHours ? (
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          Set the business opening and closing times to display hourly room occupancy.
+        </p>
+      ) : data.length === 0 ? (
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          No qualifying room reservations found for this date range.
+        </p>
+      ) : (
+        <>
+          {peakHour && (
+            <div className="mt-5 rounded-lg bg-primary/10 p-4">
+              <p className="text-xs font-medium text-muted-foreground">Peak Occupancy Hour</p>
+
+              <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-xl font-bold">{peakHour.label}</p>
+
+                <p className="text-sm font-semibold text-primary">
+                  {peakHour.averageOccupied.toFixed(1)} average occupied rooms
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 h-[280px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={data}
+                margin={{
+                  top: 10,
+                  right: 10,
+                  left: 0,
+                  bottom: 5,
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+
+                <XAxis
+                  dataKey="label"
+                  tick={{
+                    fill: "var(--muted-foreground)",
+                    fontSize: 10,
+                  }}
+                  axisLine={false}
+                  tickLine={false}
+                  interval="preserveStartEnd"
+                />
+
+                <YAxis
+                  allowDecimals
+                  tick={{
+                    fill: "var(--muted-foreground)",
+                    fontSize: 11,
+                  }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+
+                <Tooltip
+                  cursor={{
+                    fill: "var(--muted)",
+                    opacity: 0.4,
+                  }}
+                  formatter={(value) => [`${Number(value).toFixed(1)} rooms`, "Average occupancy"]}
+                  contentStyle={{
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "10px",
+                    color: "var(--foreground)",
+                  }}
+                />
+
+                <Bar
+                  dataKey="averageOccupied"
+                  name="Average occupied rooms"
+                  fill="var(--primary)"
+                  radius={[5, 5, 0, 0]}
+                  barSize={28}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <p className="mt-3 text-xs text-muted-foreground">
+            Each column represents the average number of occupied rooms at that hour per day in the
+            selected date range.
+          </p>
+        </>
+      )}
+    </div>
+  );
 }
 
 export function Reports({ res, orders }: ReportsProps) {
@@ -377,6 +626,12 @@ export function Reports({ res, orders }: ReportsProps) {
 
   const [reservationPage, setReservationPage] = useState(1);
   const [foodOrderPage, setFoodOrderPage] = useState(1);
+
+  const [reservationPageSize, setReservationPageSize] = useState(5);
+  const [foodOrderPageSize, setFoodOrderPageSize] = useState(5);
+
+  const [roomPerformancePage, setRoomPerformancePage] = useState(1);
+  const [roomPageSize, setRoomPageSize] = useState(5);
 
   const profilesQuery = useProfiles();
   const profiles = profilesQuery.data ?? {};
@@ -417,6 +672,7 @@ export function Reports({ res, orders }: ReportsProps) {
   useEffect(() => {
     setReservationPage(1);
     setFoodOrderPage(1);
+    setRoomPerformancePage(1);
   }, [search, fromDate, toDate, selectedRoom, selectedStatus]);
 
   const dateReservations = useMemo(
@@ -438,6 +694,7 @@ export function Reports({ res, orders }: ReportsProps) {
 
     return dateReservations.filter((item) => {
       const matchesRoom = selectedRoom === "all" || item.room_id === selectedRoom;
+
       const matchesStatus = selectedStatus === "all" || item.status === selectedStatus;
 
       const matchesSearch =
@@ -455,6 +712,7 @@ export function Reports({ res, orders }: ReportsProps) {
 
     return dateOrders.filter((item) => {
       const roomId = item.reservations?.rooms?.id;
+
       const matchesRoom = selectedRoom === "all" || roomId === selectedRoom;
 
       const matchesSearch =
@@ -483,10 +741,12 @@ export function Reports({ res, orders }: ReportsProps) {
   );
 
   const roomRevenue = paidReservations.reduce((sum, item) => sum + Number(item.room_total || 0), 0);
+
   const foodRevenue = paidOrders.reduce((sum, item) => sum + Number(item.food_subtotal || 0), 0);
 
   const totalRevenue = roomRevenue + foodRevenue;
   const transactionCount = paidReservations.length + paidOrders.length;
+
   const averageTransaction = transactionCount ? totalRevenue / transactionCount : 0;
 
   const statusCounts = {
@@ -561,11 +821,17 @@ export function Reports({ res, orders }: ReportsProps) {
       if (!date) return;
 
       const key = periodKey(date, revenuePeriod);
-      const current = grouped.get(key) ?? { revenue: 0, reservations: 0 };
+
+      const current = grouped.get(key) ?? {
+        revenue: 0,
+        reservations: 0,
+      };
 
       current.revenue += amount;
 
-      if (isReservation) current.reservations += 1;
+      if (isReservation) {
+        current.reservations += 1;
+      }
 
       grouped.set(key, current);
     };
@@ -578,24 +844,92 @@ export function Reports({ res, orders }: ReportsProps) {
 
     return [...grouped.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, value]) => ({ key, ...value }));
+      .map(([key, value]) => ({
+        key,
+        ...value,
+        label: periodLabel(key, revenuePeriod),
+      }));
   }, [paidReservations, paidOrders, revenuePeriod]);
 
-  const maxRevenue = Math.max(1, ...revenueGroups.map((item) => item.revenue));
+  const hourlyOccupancy = useMemo<HourlyOccupancy[]>(() => {
+    const opening = settings?.opening_time;
+    const closing = settings?.closing_time;
 
-  const popularHours = useMemo(() => {
-    const counts: Record<string, number> = {};
+    if (!validRange || !opening || !closing) return [];
 
-    dateReservations.forEach((item) => {
-      const time = item.start_time.slice(0, 5);
-      counts[time] = (counts[time] ?? 0) + 1;
-    });
+    const openingMinutes = timeToMinutes(opening);
+    let closingMinutes = timeToMinutes(closing);
 
-    return Object.entries(counts)
-      .map(([time, count]) => ({ time, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-  }, [dateReservations]);
+    if (closingMinutes <= openingMinutes) {
+      closingMinutes += 24 * 60;
+    }
+
+    const firstHour = Math.floor(openingMinutes / 60);
+    const lastHour = Math.ceil(closingMinutes / 60);
+
+    const days: string[] = [];
+    const cursor = new Date(`${fromDate}T00:00:00`);
+    const end = new Date(`${toDate}T00:00:00`);
+
+    while (cursor <= end) {
+      days.push(localDate(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const results: HourlyOccupancy[] = [];
+
+    for (let hour = firstHour; hour < lastHour; hour++) {
+      const hourStart = hour * 60;
+      const hourEnd = hourStart + 60;
+
+      const totalOccupied = days.reduce((dailyTotal, day) => {
+        const occupiedRooms = new Set<string>();
+
+        dateReservations.forEach((reservation) => {
+          if (
+            reservation.booking_date?.slice(0, 10) !== day ||
+            !BOOKING_STATUSES.includes(reservation.status) ||
+            !reservation.room_id
+          ) {
+            return;
+          }
+
+          const reservationStart = timeToMinutes(reservation.start_time);
+
+          let reservationEnd = timeToMinutes(reservation.end_time);
+
+          if (reservationEnd <= reservationStart) {
+            reservationEnd += 24 * 60;
+          }
+
+          const overlaps = reservationStart < hourEnd && reservationEnd > hourStart;
+
+          if (overlaps) {
+            occupiedRooms.add(reservation.room_id);
+          }
+        });
+
+        return dailyTotal + occupiedRooms.size;
+      }, 0);
+
+      results.push({
+        hour,
+        label: formatHour(hour),
+        totalOccupied,
+        averageOccupied: days.length ? totalOccupied / days.length : 0,
+      });
+    }
+
+    return results;
+  }, [dateReservations, fromDate, toDate, settings, validRange]);
+
+  const peakOccupancyHour = useMemo(
+    () =>
+      hourlyOccupancy.length
+        ? [...hourlyOccupancy].sort((a, b) => b.averageOccupied - a.averageOccupied)[0]
+        : undefined,
+    [hourlyOccupancy],
+  );
 
   const foodItems = useMemo<FoodItemSummary[]>(() => {
     const grouped = new Map<string, { quantity: number; revenue: number }>();
@@ -606,7 +940,10 @@ export function Reports({ res, orders }: ReportsProps) {
 
         if (!details) return;
 
-        const current = grouped.get(details.name) ?? { quantity: 0, revenue: 0 };
+        const current = grouped.get(details.name) ?? {
+          quantity: 0,
+          revenue: 0,
+        };
 
         current.quantity += details.quantity;
         current.revenue += details.revenue;
@@ -616,9 +953,19 @@ export function Reports({ res, orders }: ReportsProps) {
     });
 
     return [...grouped.entries()]
-      .map(([name, values]) => ({ name, ...values }))
+      .map(([name, values]) => ({
+        name,
+        ...values,
+      }))
       .sort((a, b) => b.quantity - a.quantity);
   }, [paidOrders]);
+
+  const rankedFoodItems = foodItems.slice(0, CHART_LIMIT);
+
+  const rankedRooms = useMemo(
+    () => [...roomPerformance].sort((a, b) => b.bookings - a.bookings).slice(0, CHART_LIMIT),
+    [roomPerformance],
+  );
 
   const mostBooked = [...roomPerformance].sort((a, b) => b.bookings - a.bookings)[0];
 
@@ -626,17 +973,28 @@ export function Reports({ res, orders }: ReportsProps) {
     .filter((room) => room.is_active)
     .sort((a, b) => a.bookings - b.bookings)[0];
 
-  const reservationTotalPages = Math.max(1, Math.ceil(filteredReservations.length / PAGE_SIZE));
-  const foodOrderTotalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+  const reservationTotalPages = Math.max(
+    1,
+    Math.ceil(filteredReservations.length / reservationPageSize),
+  );
+
+  const foodOrderTotalPages = Math.max(1, Math.ceil(filteredOrders.length / foodOrderPageSize));
+
+  const roomPerformanceTotalPages = Math.max(1, Math.ceil(roomPerformance.length / roomPageSize));
 
   const paginatedReservations = filteredReservations.slice(
-    (reservationPage - 1) * PAGE_SIZE,
-    reservationPage * PAGE_SIZE,
+    (reservationPage - 1) * reservationPageSize,
+    reservationPage * reservationPageSize,
   );
 
   const paginatedOrders = filteredOrders.slice(
-    (foodOrderPage - 1) * PAGE_SIZE,
-    foodOrderPage * PAGE_SIZE,
+    (foodOrderPage - 1) * foodOrderPageSize,
+    foodOrderPage * foodOrderPageSize,
+  );
+
+  const paginatedRoomPerformance = roomPerformance.slice(
+    (roomPerformancePage - 1) * roomPageSize,
+    roomPerformancePage * roomPageSize,
   );
 
   const exportReport = () => {
@@ -653,12 +1011,7 @@ export function Reports({ res, orders }: ReportsProps) {
       ["Room utilization (%)", utilization.toFixed(2)],
       [],
       ["REVENUE", "Period", "Revenue", "Reservation count"],
-      ...revenueGroups.map((item) => [
-        "Revenue",
-        periodLabel(item.key, revenuePeriod),
-        item.revenue,
-        item.reservations,
-      ]),
+      ...revenueGroups.map((item) => ["Revenue", item.label, item.revenue, item.reservations]),
       [],
       ["ROOM PERFORMANCE", "Room", "Bookings", "Booked hours", "Revenue", "Utilization"],
       ...roomPerformance.map((room) => [
@@ -668,6 +1021,14 @@ export function Reports({ res, orders }: ReportsProps) {
         room.bookedHours.toFixed(2),
         room.revenue,
         room.utilization.toFixed(2),
+      ]),
+      [],
+      ["HOURLY OCCUPANCY", "Hour", "Total occupied room counts", "Average occupied rooms"],
+      ...hourlyOccupancy.map((item) => [
+        "Hourly occupancy",
+        item.label,
+        item.totalOccupied,
+        item.averageOccupied.toFixed(2),
       ]),
       [],
       [
@@ -720,8 +1081,16 @@ export function Reports({ res, orders }: ReportsProps) {
   }[] = [
     { id: "overview", label: "Overview", icon: BarChart3 },
     { id: "revenue", label: "Revenue", icon: Wallet },
-    { id: "reservations", label: "Reservations", icon: CalendarDays },
-    { id: "rooms", label: "Room Performance", icon: Music },
+    {
+      id: "reservations",
+      label: "Reservations",
+      icon: CalendarDays,
+    },
+    {
+      id: "rooms",
+      label: "Room Performance",
+      icon: Music,
+    },
     { id: "food", label: "Food Sales", icon: Utensils },
   ];
 
@@ -731,6 +1100,7 @@ export function Reports({ res, orders }: ReportsProps) {
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Reports & Analytics</h1>
+
           <p className="mt-1 text-sm text-muted-foreground">
             Review your business performance and sales reports.
           </p>
@@ -751,7 +1121,6 @@ export function Reports({ res, orders }: ReportsProps) {
 
       {/* SHARED FILTER TOOLBAR */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3">
-        {/* SEARCH */}
         <div className="min-w-0 flex-1 space-y-1.5">
           <Label className="text-xs font-medium text-muted-foreground">Search</Label>
 
@@ -767,13 +1136,12 @@ export function Reports({ res, orders }: ReportsProps) {
           </div>
         </div>
 
-        {/* DATE RANGE */}
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
-          {/* From Date */}
           <div className="min-w-0 space-y-1 sm:w-[150px]">
             <Label htmlFor="report-from-date" className="text-xs text-muted-foreground">
               From date
             </Label>
+
             <Input
               id="report-from-date"
               type="date"
@@ -784,11 +1152,11 @@ export function Reports({ res, orders }: ReportsProps) {
             />
           </div>
 
-          {/* To Date */}
           <div className="min-w-0 space-y-1 sm:w-[150px]">
             <Label htmlFor="report-to-date" className="text-xs text-muted-foreground">
               To date
             </Label>
+
             <Input
               id="report-to-date"
               type="date"
@@ -800,7 +1168,6 @@ export function Reports({ res, orders }: ReportsProps) {
           </div>
         </div>
 
-        {/* FILTER BUTTON */}
         <div className="w-full space-y-1 sm:w-auto">
           <Button
             type="button"
@@ -847,7 +1214,6 @@ export function Reports({ res, orders }: ReportsProps) {
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* ROOM */}
             <div className="space-y-1.5">
               <Label htmlFor="report-room">Room</Label>
 
@@ -870,7 +1236,6 @@ export function Reports({ res, orders }: ReportsProps) {
               </Select>
             </div>
 
-            {/* RESERVATION STATUS */}
             <div className="space-y-1.5">
               <Label htmlFor="report-status">Reservation status</Label>
 
@@ -911,7 +1276,6 @@ export function Reports({ res, orders }: ReportsProps) {
               </Select>
             </div>
 
-            {/* FILTER ACTIONS */}
             <div className="flex justify-between gap-2 border-t border-border pt-4">
               <Button
                 type="button"
@@ -1011,6 +1375,7 @@ export function Reports({ res, orders }: ReportsProps) {
                 ].map(([label, count]) => (
                   <div key={String(label)} className="rounded-lg bg-muted/50 p-3">
                     <p className="text-xs text-muted-foreground">{label}</p>
+
                     <p className="mt-1 text-xl font-semibold">{Number(count)}</p>
                   </div>
                 ))}
@@ -1057,27 +1422,36 @@ export function Reports({ res, orders }: ReportsProps) {
             </div>
           </div>
 
-          <div className="rounded-xl border bg-card p-5">
-            <SectionHeading title="Top Performing Rooms" />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <RankedBarChart
+              title="Most Frequently Ordered Food"
+              description="Top 5 food items by quantity sold from paid food orders"
+              items={rankedFoodItems.map((item) => ({
+                name: item.name,
+                value: item.quantity,
+              }))}
+              valueLabel="sold"
+              emptyMessage="No food sales recorded yet."
+            />
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg bg-muted/50 p-4">
-                <p className="text-xs text-muted-foreground">Most Booked</p>
-                <p className="mt-1 font-semibold">{mostBooked?.name ?? "No data"}</p>
-                <p className="text-xs text-muted-foreground">
-                  {mostBooked?.bookings ?? 0} bookings
-                </p>
-              </div>
-
-              <div className="rounded-lg bg-muted/50 p-4">
-                <p className="text-xs text-muted-foreground">Least Booked Active Room</p>
-                <p className="mt-1 font-semibold">{leastBooked?.name ?? "No data"}</p>
-                <p className="text-xs text-muted-foreground">
-                  {leastBooked?.bookings ?? 0} bookings
-                </p>
-              </div>
-            </div>
+            <RankedBarChart
+              title="Most Reserved Rooms"
+              description="Top 5 rooms ranked by approved, checked-in, and completed reservations"
+              items={rankedRooms.map((room) => ({
+                name: room.name,
+                value: room.bookings,
+                subtitle: `Room ${room.room_number}`,
+              }))}
+              valueLabel="bookings"
+              emptyMessage="No room reservations recorded yet."
+            />
           </div>
+
+          <HourlyOccupancyChart
+            data={hourlyOccupancy}
+            peakHour={peakOccupancyHour}
+            configuredHours={Boolean(settings?.opening_time && settings?.closing_time)}
+          />
         </div>
       )}
 
@@ -1123,12 +1497,15 @@ export function Reports({ res, orders }: ReportsProps) {
                   <SelectItem value="daily" className="cursor-pointer">
                     Daily
                   </SelectItem>
+
                   <SelectItem value="weekly" className="cursor-pointer">
                     Weekly
                   </SelectItem>
+
                   <SelectItem value="monthly" className="cursor-pointer">
                     Monthly
                   </SelectItem>
+
                   <SelectItem value="yearly" className="cursor-pointer">
                     Yearly
                   </SelectItem>
@@ -1141,30 +1518,69 @@ export function Reports({ res, orders }: ReportsProps) {
                 No paid revenue found for this date range.
               </p>
             ) : (
-              <div className="mt-6 space-y-4">
-                {revenueGroups.map((item) => (
-                  <div
-                    key={item.key}
-                    className="grid grid-cols-[minmax(100px,150px)_1fr_auto] items-center gap-3"
+              <div className="mt-6 h-[320px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={revenueGroups}
+                    margin={{
+                      top: 10,
+                      right: 20,
+                      left: 10,
+                      bottom: 35,
+                    }}
                   >
-                    <span className="text-xs text-muted-foreground">
-                      {periodLabel(item.key, revenuePeriod)}
-                    </span>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
 
-                    <div className="h-3 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{
-                          width: `${(item.revenue / maxRevenue) * 100}%`,
-                        }}
-                      />
-                    </div>
+                    <XAxis
+                      dataKey="label"
+                      tick={{
+                        fill: "var(--muted-foreground)",
+                        fontSize: 10,
+                      }}
+                      axisLine={false}
+                      tickLine={false}
+                      angle={-25}
+                      textAnchor="end"
+                      interval="preserveStartEnd"
+                    />
 
-                    <span className="min-w-[90px] text-right text-sm font-semibold">
-                      {peso(item.revenue)}
-                    </span>
-                  </div>
-                ))}
+                    <YAxis
+                      tick={{
+                        fill: "var(--muted-foreground)",
+                        fontSize: 11,
+                      }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(value) => `₱${Number(value).toLocaleString()}`}
+                      width={75}
+                    />
+
+                    <Tooltip
+                      formatter={(value) => [peso(Number(value)), "Revenue"]}
+                      labelFormatter={(label) => String(label)}
+                      contentStyle={{
+                        backgroundColor: "var(--card)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "10px",
+                        color: "var(--foreground)",
+                      }}
+                    />
+
+                    <Line
+                      type="monotone"
+                      dataKey="revenue"
+                      name="Revenue"
+                      stroke="var(--primary)"
+                      strokeWidth={3}
+                      dot={{
+                        r: 4,
+                        fill: "var(--primary)",
+                        strokeWidth: 0,
+                      }}
+                      activeDot={{ r: 6, fill: "var(--primary)" }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
             )}
           </div>
@@ -1218,30 +1634,11 @@ export function Reports({ res, orders }: ReportsProps) {
             />
           </div>
 
-          <div className="rounded-xl border bg-card p-5">
-            <SectionHeading
-              title="Popular Reservation Hours"
-              description="Most frequently selected reservation start times"
-            />
-
-            {popularHours.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No reservation data available.
-              </p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {popularHours.map((item) => (
-                  <div
-                    key={item.time}
-                    className="flex items-center justify-between rounded-lg bg-muted/40 px-4 py-3"
-                  >
-                    <span className="font-medium">{item.time}</span>
-                    <span className="text-sm text-muted-foreground">{item.count} reservations</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <HourlyOccupancyChart
+            data={hourlyOccupancy}
+            peakHour={peakOccupancyHour}
+            configuredHours={Boolean(settings?.opening_time && settings?.closing_time)}
+          />
 
           <div className="rounded-xl border bg-card p-5">
             <SectionHeading
@@ -1267,18 +1664,25 @@ export function Reports({ res, orders }: ReportsProps) {
                 {paginatedReservations.map((item) => (
                   <tr key={item.id} className="border-b last:border-0">
                     <td className="px-3 py-3 font-medium">{item.reference_code}</td>
+
                     <td className="px-3 py-3">{customerName(profiles, item.user_id)}</td>
+
                     <td className="px-3 py-3">{roomName(item)}</td>
+
                     <td className="px-3 py-3">{fmtDate(item.booking_date)}</td>
+
                     <td className="px-3 py-3">
                       {hoursBetween(item.start_time, item.end_time).toFixed(1)} hrs
                     </td>
+
                     <td className="px-3 py-3">
                       <StatusBadge status={item.status} />
                     </td>
+
                     <td className="px-3 py-3">
                       <StatusBadge status={item.payment_status} />
                     </td>
+
                     <td className="px-3 py-3 text-right font-medium">
                       {peso(Number(item.room_total || 0))}
                     </td>
@@ -1287,14 +1691,20 @@ export function Reports({ res, orders }: ReportsProps) {
               </DataTable>
             </div>
 
-            <TablePagination
-              page={reservationPage}
-              totalItems={filteredReservations.length}
-              pageSize={PAGE_SIZE}
-              onPageChange={(page) =>
-                setReservationPage(Math.min(Math.max(1, page), reservationTotalPages))
-              }
-            />
+            <div className="mt-4">
+              <TablePagination
+                page={reservationPage}
+                totalItems={filteredReservations.length}
+                pageSize={reservationPageSize}
+                onPageChange={(page) =>
+                  setReservationPage(Math.min(Math.max(1, page), reservationTotalPages))
+                }
+                onPageSizeChange={(size) => {
+                  setReservationPageSize(size);
+                  setReservationPage(1);
+                }}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -1325,23 +1735,70 @@ export function Reports({ res, orders }: ReportsProps) {
             />
           </div>
 
+          <RankedBarChart
+            title="Room Reservation Rankings"
+            description="Top 5 rooms ranked from highest to lowest reservation count"
+            items={rankedRooms.map((room) => ({
+              name: room.name,
+              value: room.bookings,
+              subtitle: `Room ${room.room_number}`,
+            }))}
+            valueLabel="bookings"
+            emptyMessage="No room reservation data available."
+          />
+
           <div className="rounded-xl border bg-card p-5">
-            <SectionHeading title="Room Performance" />
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <SectionHeading
+                title="Room Performance"
+                description={`${roomPerformance.length} rooms in total`}
+              />
+
+              <div className="flex items-center gap-2">
+                <Label
+                  htmlFor="room-performance-page-size"
+                  className="whitespace-nowrap text-xs text-muted-foreground"
+                >
+                  Rows per page
+                </Label>
+
+                <Select
+                  value={String(roomPageSize)}
+                  onValueChange={(value) => {
+                    setRoomPageSize(Number(value));
+                    setRoomPerformancePage(1);
+                  }}
+                >
+                  <SelectTrigger id="room-performance-page-size" className="h-9 w-[85px]">
+                    <SelectValue />
+                  </SelectTrigger>
+
+                  <SelectContent>
+                    <SelectItem value="5">5</SelectItem>
+                    <SelectItem value="10">10</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
             <div className="mt-4">
               <DataTable
                 headers={["Room", "Bookings", "Booked Hours", "Revenue", "Utilization"]}
                 empty={roomPerformance.length === 0}
               >
-                {roomPerformance.map((room) => (
+                {paginatedRoomPerformance.map((room) => (
                   <tr key={room.id} className="border-b last:border-0">
                     <td className="px-3 py-3">
                       <p className="font-medium">{room.name}</p>
                       <p className="text-xs text-muted-foreground">Room {room.room_number}</p>
                     </td>
+
                     <td className="px-3 py-3">{room.bookings}</td>
+
                     <td className="px-3 py-3">{room.bookedHours.toFixed(1)} hrs</td>
+
                     <td className="px-3 py-3 font-medium">{peso(room.revenue)}</td>
+
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
                         <div className="h-2 w-20 overflow-hidden rounded-full bg-muted">
@@ -1352,6 +1809,7 @@ export function Reports({ res, orders }: ReportsProps) {
                             }}
                           />
                         </div>
+
                         <span className="text-xs">{room.utilization.toFixed(1)}%</span>
                       </div>
                     </td>
@@ -1359,18 +1817,31 @@ export function Reports({ res, orders }: ReportsProps) {
                 ))}
               </DataTable>
             </div>
+
+            <TablePagination
+              page={roomPerformancePage}
+              totalItems={roomPerformance.length}
+              pageSize={roomPageSize}
+              onPageChange={(page) =>
+                setRoomPerformancePage(Math.min(Math.max(1, page), roomPerformanceTotalPages))
+              }
+            />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border bg-card p-4">
               <p className="text-xs text-muted-foreground">Most Booked Room</p>
+
               <p className="mt-1 font-semibold">{mostBooked?.name ?? "No data"}</p>
+
               <p className="text-xs text-muted-foreground">{mostBooked?.bookings ?? 0} bookings</p>
             </div>
 
             <div className="rounded-xl border bg-card p-4">
               <p className="text-xs text-muted-foreground">Least Booked Active Room</p>
+
               <p className="mt-1 font-semibold">{leastBooked?.name ?? "No data"}</p>
+
               <p className="text-xs text-muted-foreground">{leastBooked?.bookings ?? 0} bookings</p>
             </div>
           </div>
@@ -1382,49 +1853,38 @@ export function Reports({ res, orders }: ReportsProps) {
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <MetricCard
-              title="Food Revenue"
+              title="Total Food Revenue"
               value={peso(foodRevenue)}
               note="Paid food orders"
               icon={Utensils}
             />
 
             <MetricCard
-              title="Paid Food Orders"
-              value={String(paidOrders.length)}
-              note="Non-cancelled paid orders"
+              title="Food Orders"
+              value={String(dateOrders.length)}
+              note="Within selected dates"
               icon={Receipt}
             />
 
             <MetricCard
-              title="Food Order Records"
-              value={String(filteredOrders.length)}
-              note="Matching selected filters"
-              icon={FileSpreadsheet}
+              title="Paid Food Orders"
+              value={String(paidOrders.length)}
+              note="Successfully paid orders"
+              icon={Wallet}
             />
           </div>
 
-          <div className="rounded-xl border bg-card p-5">
-            <SectionHeading
-              title="Bestselling Food Items"
-              description="Top-selling items from paid food orders"
-            />
-
-            <div className="mt-4">
-              <DataTable
-                headers={["Food Item", "Quantity Sold", "Revenue"]}
-                empty={foodItems.length === 0}
-                emptyMessage="No food sales recorded yet."
-              >
-                {foodItems.map((item) => (
-                  <tr key={item.name} className="border-b last:border-0">
-                    <td className="px-3 py-3 font-medium">{item.name}</td>
-                    <td className="px-3 py-3">{item.quantity}</td>
-                    <td className="px-3 py-3 text-right font-medium">{peso(item.revenue)}</td>
-                  </tr>
-                ))}
-              </DataTable>
-            </div>
-          </div>
+          <RankedBarChart
+            title="Bestselling Food Items"
+            description="Top 5 food items ranked by quantity sold from paid food orders"
+            items={rankedFoodItems.map((item) => ({
+              name: item.name,
+              value: item.quantity,
+              subtitle: `Revenue: ${peso(item.revenue)}`,
+            }))}
+            valueLabel="sold"
+            emptyMessage="No food sales recorded yet."
+          />
 
           <div className="rounded-xl border bg-card p-5">
             <SectionHeading
@@ -1434,21 +1894,40 @@ export function Reports({ res, orders }: ReportsProps) {
 
             <div className="mt-4">
               <DataTable
-                headers={["Reference", "Customer", "Reservation", "Status", "Payment", "Total"]}
+                headers={[
+                  "Reference",
+                  "Customer",
+                  "Reservation",
+                  "Date",
+                  "Status",
+                  "Payment",
+                  "Total",
+                ]}
                 empty={filteredOrders.length === 0}
-                colSpan={6}
+                colSpan={7}
               >
                 {paginatedOrders.map((item) => (
                   <tr key={item.id} className="border-b last:border-0">
                     <td className="px-3 py-3 font-medium">{item.reference_code}</td>
+
                     <td className="px-3 py-3">{customerName(profiles, item.user_id)}</td>
+
                     <td className="px-3 py-3">{item.reservations?.reference_code ?? "—"}</td>
+
+                    <td className="px-3 py-3">
+                      {item.reservations?.booking_date
+                        ? fmtDate(item.reservations.booking_date)
+                        : "—"}
+                    </td>
+
                     <td className="px-3 py-3">
                       <StatusBadge status={item.status} />
                     </td>
+
                     <td className="px-3 py-3">
                       <StatusBadge status={item.payment_status} />
                     </td>
+
                     <td className="px-3 py-3 text-right font-medium">
                       {peso(Number(item.food_subtotal || 0))}
                     </td>
@@ -1457,14 +1936,45 @@ export function Reports({ res, orders }: ReportsProps) {
               </DataTable>
             </div>
 
-            <TablePagination
-              page={foodOrderPage}
-              totalItems={filteredOrders.length}
-              pageSize={PAGE_SIZE}
-              onPageChange={(page) =>
-                setFoodOrderPage(Math.min(Math.max(1, page), foodOrderTotalPages))
-              }
+            <div className="mt-4">
+              <TablePagination
+                page={foodOrderPage}
+                totalItems={filteredOrders.length}
+                pageSize={foodOrderPageSize}
+                onPageChange={(page) =>
+                  setFoodOrderPage(Math.min(Math.max(1, page), foodOrderTotalPages))
+                }
+                onPageSizeChange={(size) => {
+                  setFoodOrderPageSize(size);
+                  setFoodOrderPage(1);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border bg-card p-5">
+            <SectionHeading
+              title="Food Item Sales Summary"
+              description="Quantity sold and revenue generated by each food item"
             />
+
+            <div className="mt-4">
+              <DataTable
+                headers={["Food Item", "Quantity Sold", "Revenue"]}
+                empty={foodItems.length === 0}
+                colSpan={3}
+              >
+                {foodItems.map((item) => (
+                  <tr key={item.name} className="border-b last:border-0">
+                    <td className="px-3 py-3 font-medium">{item.name}</td>
+
+                    <td className="px-3 py-3">{item.quantity.toLocaleString()}</td>
+
+                    <td className="px-3 py-3 text-right font-medium">{peso(item.revenue)}</td>
+                  </tr>
+                ))}
+              </DataTable>
+            </div>
           </div>
         </div>
       )}

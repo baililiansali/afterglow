@@ -1000,6 +1000,7 @@ function RoomPage() {
                     type="date"
                     min={today()}
                     value={date}
+                    className="h-10 w-full [color-scheme:dark]"
                     onChange={(e) => {
                       setDate(e.target.value);
                       setStart("");

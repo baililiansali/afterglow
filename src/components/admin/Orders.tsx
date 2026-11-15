@@ -66,9 +66,6 @@ const ORDER_STATUSES: FoStatus[] = ["pending", "served", "cancelled"];
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
-  confirmed: "Confirmed",
-  preparing: "Preparing",
-  ready: "Ready",
   served: "Served",
   cancelled: "Cancelled",
 };
@@ -241,7 +238,7 @@ export function Orders({
       .sort((a, b) =>
         sort === "submitted"
           ? (b.submitted_at || b.created_at).localeCompare(a.submitted_at || a.created_at)
-          : (b.reservations?.booking_date ?? "").localeCompare(b.reservations?.booking_date ?? ""),
+          : (b.reservations?.booking_date ?? "").localeCompare(a.reservations?.booking_date ?? ""),
       );
   }, [orders, status, dateFrom, dateTo, q, sort]);
 
@@ -745,7 +742,6 @@ export function Orders({
     <div
       className={`flex items-center gap-2 ${viewMode === "grid" ? "justify-start" : "justify-end"}`}
     >
-      {/* View Details */}
       <Button
         type="button"
         size={viewMode === "grid" ? "sm" : "icon"}
@@ -759,7 +755,6 @@ export function Orders({
         {viewMode === "grid" && <span>Details</span>}
       </Button>
 
-      {/* View Payment */}
       <Button
         type="button"
         size={viewMode === "grid" ? "sm" : "icon"}
@@ -773,7 +768,6 @@ export function Orders({
         {viewMode === "grid" && <span>View Payment</span>}
       </Button>
 
-      {/* Edit Order */}
       {order.status === "pending" && (
         <Button
           type="button"
@@ -792,7 +786,6 @@ export function Orders({
     </div>
   );
 
-  // Status is intentionally the last table column.
   const headers = [
     "Order ID",
     "Customer",
@@ -809,7 +802,6 @@ export function Orders({
 
   return (
     <div className="mt-4 space-y-4">
-      {/* Page heading */}
       <div>
         <h2 className="font-display text-xl font-bold">Food Orders</h2>
         <p className="mt-1 text-sm text-muted-foreground">Track food orders and manage serving.</p>
@@ -817,56 +809,48 @@ export function Orders({
 
       {/* Food Orders Overview */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {/* Total Active Orders */}
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm text-muted-foreground">Total Active Orders</p>
               <p className="mt-2 text-2xl font-bold">{orderOverview.total}</p>
             </div>
-
             <div className="rounded-lg bg-primary/10 p-2.5 text-primary">
               <ShoppingBag className="h-5 w-5" />
             </div>
           </div>
         </div>
 
-        {/* Pending Orders */}
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm text-muted-foreground">Pending Orders</p>
               <p className="mt-2 text-2xl font-bold">{orderOverview.pending}</p>
             </div>
-
             <div className="rounded-lg bg-yellow-500/10 p-2.5 text-yellow-500">
               <Clock3 className="h-5 w-5" />
             </div>
           </div>
         </div>
 
-        {/* Served Orders */}
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm text-muted-foreground">Served Orders</p>
               <p className="mt-2 text-2xl font-bold">{orderOverview.served}</p>
             </div>
-
             <div className="rounded-lg bg-green-500/10 p-2.5 text-green-500">
               <CheckCircle2 className="h-5 w-5" />
             </div>
           </div>
         </div>
 
-        {/* Cancelled Orders */}
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm text-muted-foreground">Cancelled Orders</p>
               <p className="mt-2 text-2xl font-bold">{orderOverview.cancelled}</p>
             </div>
-
             <div className="rounded-lg bg-destructive/10 p-2.5 text-destructive">
               <XCircle className="h-5 w-5" />
             </div>
@@ -877,10 +861,8 @@ export function Orders({
       {/* Toolbar */}
       <div className="space-y-3 rounded-xl border border-border bg-card p-3">
         <div className="flex flex-wrap items-end gap-3">
-          {/* Search */}
           <div className="relative min-w-[220px] flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-
             <Input
               id="orders-q"
               className="pl-9"
@@ -890,13 +872,11 @@ export function Orders({
             />
           </div>
 
-          {/* Date filters */}
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-full space-y-1 sm:w-[150px]">
               <Label htmlFor="orders-date-from" className="text-xs text-muted-foreground">
                 From date
               </Label>
-
               <Input
                 id="orders-date-from"
                 type="date"
@@ -911,7 +891,6 @@ export function Orders({
               <Label htmlFor="orders-date-to" className="text-xs text-muted-foreground">
                 To date
               </Label>
-
               <Input
                 id="orders-date-to"
                 type="date"
@@ -923,7 +902,6 @@ export function Orders({
             </div>
           </div>
 
-          {/* Filter */}
           <Button
             type="button"
             variant="outline"
@@ -939,7 +917,6 @@ export function Orders({
             )}
           </Button>
 
-          {/* Grid / List toggle */}
           <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
             <Button
               size="sm"
@@ -949,7 +926,6 @@ export function Orders({
               <LayoutGrid className="mr-1.5 h-4 w-4" />
               Grid
             </Button>
-
             <Button
               size="sm"
               variant={view === "list" ? "default" : "ghost"}
@@ -960,7 +936,6 @@ export function Orders({
             </Button>
           </div>
 
-          {/* Add Order */}
           <Button
             type="button"
             className="h-10 shrink-0 border-pink-500 bg-pink-500 text-white hover:border-pink-600 hover:bg-pink-600"
@@ -1006,22 +981,18 @@ export function Orders({
                   <td className="p-3">{order.profiles?.phone || "—"}</td>
                   <td className="p-3">{order.profiles?.email || "—"}</td>
                   <td className="p-3">{order.reservations?.rooms?.name ?? "—"}</td>
-
                   <td className="p-3">
                     {order.reservations?.booking_date
                       ? fmtDate(order.reservations.booking_date)
                       : "—"}
                   </td>
-
                   <td className="p-3">{totalQuantity(order)}</td>
                   <td className="p-3 font-medium">{peso(order.food_subtotal)}</td>
-
                   <td className="p-3 text-muted-foreground">
                     {order.submitted_at || order.created_at
                       ? fmtDate(order.submitted_at || order.created_at)
                       : "—"}
                   </td>
-
                   <td className="p-3">{actionDisplay(order, "list")}</td>
                   <td className="p-3">{statusControl(order)}</td>
                 </tr>
@@ -1052,7 +1023,6 @@ export function Orders({
                         {orderCustomer(order)}
                       </p>
                     </div>
-
                     <div className="shrink-0">{statusControl(order)}</div>
                   </div>
 
@@ -1126,7 +1096,6 @@ export function Orders({
         onOpenChange={(isOpen) => {
           if (!savingNewOrder) {
             setAddOrderOpen(isOpen);
-
             if (!isOpen) resetNewOrder();
           }
         }}
@@ -1142,7 +1111,6 @@ export function Orders({
 
               <div>
                 <Label htmlFor="new-order-reservation">Select Reservation</Label>
-
                 <Select
                   value={newReservationId}
                   onValueChange={setNewReservationId}
@@ -1212,7 +1180,6 @@ export function Orders({
             <section className="space-y-3">
               <h3 className="font-semibold">Food Items</h3>
 
-              {/* Add Food Item dropdown */}
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Select value={newSelectedMenuItem} onValueChange={setNewSelectedMenuItem}>
                   <SelectTrigger className="h-10 min-w-0 flex-1 justify-between text-sm">
@@ -1310,7 +1277,6 @@ export function Orders({
 
             <section className="space-y-2">
               <Label htmlFor="new-order-instructions">Special Instructions</Label>
-
               <Textarea
                 id="new-order-instructions"
                 placeholder="Enter any special instructions..."
@@ -1359,10 +1325,8 @@ export function Orders({
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Order Status */}
             <div className="space-y-1.5">
               <Label htmlFor="orders-status">Order status</Label>
-
               <Select
                 value={status}
                 onValueChange={(value) => setStatus(value as "all" | FoStatus)}
@@ -1385,10 +1349,8 @@ export function Orders({
               </Select>
             </div>
 
-            {/* Sort By */}
             <div className="space-y-1.5">
               <Label htmlFor="orders-sort">Sort by</Label>
-
               <Select value={sort} onValueChange={(value) => setSort(value as SortMode)}>
                 <SelectTrigger id="orders-sort" className="h-10 w-full justify-between text-sm">
                   <SelectValue placeholder="Select sorting" />
@@ -1398,7 +1360,6 @@ export function Orders({
                   <SelectItem value="submitted" className={dropdownItemClass}>
                     Date submitted
                   </SelectItem>
-
                   <SelectItem value="booking" className={dropdownItemClass}>
                     Booking date
                   </SelectItem>
@@ -1406,12 +1367,10 @@ export function Orders({
               </Select>
             </div>
 
-            {/* Filter Actions */}
             <div className="flex justify-between gap-2 border-t border-border pt-4">
               <Button variant="ghost" onClick={clearFilters}>
                 Clear all
               </Button>
-
               <Button onClick={() => setFilterOpen(false)}>Apply filters</Button>
             </div>
           </div>
@@ -1540,7 +1499,6 @@ export function Orders({
                             {item.quantity} × {peso(item.unit_price_snapshot)}
                           </p>
                         </div>
-
                         <p className="font-semibold">{peso(item.line_total)}</p>
                       </div>
                     ))}
@@ -1556,7 +1514,6 @@ export function Orders({
               {open.special_instructions && (
                 <section className="space-y-3">
                   <h3 className="font-semibold">Special Instructions</h3>
-
                   <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground">
                     {open.special_instructions}
                   </div>
@@ -1591,7 +1548,6 @@ export function Orders({
               <section className="space-y-3">
                 <h3 className="font-semibold">Food Items</h3>
 
-                {/* Edit Food Item dropdown */}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Select value={selectedMenuItem} onValueChange={setSelectedMenuItem}>
                     <SelectTrigger className="h-10 min-w-0 flex-1 justify-between text-sm">
@@ -1746,7 +1702,6 @@ export function Orders({
 
               <section className="space-y-2">
                 <Label htmlFor="edit-special-instructions">Special Instructions</Label>
-
                 <Textarea
                   id="edit-special-instructions"
                   placeholder="Enter any special instructions..."

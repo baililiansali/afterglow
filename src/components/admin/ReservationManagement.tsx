@@ -17,8 +17,6 @@ import {
   CreditCard,
 } from "lucide-react";
 
-import { format, parseISO } from "date-fns";
-
 import { StatusBadge, statusLabel } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
@@ -34,17 +32,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-
-import { Calendar } from "@/components/ui/calendar";
-
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { supabase } from "@/integrations/supabase/client";
+
 import { durationHours, errMsg, fmtDate, fmtTime, overlaps, peso } from "@/lib/afterglow";
 
 import { roomsQuery } from "@/lib/queries";
-
 import type { Database } from "@/integrations/supabase/types";
 
 import { useProfiles, type ResRow, type ResStatus } from "./shared";
@@ -58,6 +52,13 @@ type ReservationManagerProps = {
   res: ResRow[];
   mode: Mode;
   onViewPayment?: (reservationId: string) => void;
+
+  /**
+   * Enables Staff-specific query invalidation.
+   * Staff permissions are additionally enforced by Supabase RLS
+   * and the reservation update trigger.
+   */
+  staffMode?: boolean;
 };
 
 const RESERVATION_STATUSES: ResStatus[] = ["pending", "rejected", "cancelled"];
@@ -92,17 +93,6 @@ function getManilaDateTime() {
 }
 
 /**
- * Converts a Date to YYYY-MM-DD using local date values.
- */
-function localDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-/**
  * Determines whether a reservation can be checked in.
  */
 function canCheckIn(r: ResRow): boolean {
@@ -117,7 +107,6 @@ function canCheckIn(r: ResRow): boolean {
 
 /**
  * Date input with a custom calendar icon.
- * The native picker remains clickable.
  */
 function CustomDateInput({
   id,
@@ -154,13 +143,20 @@ function CustomDateInput({
         max={max}
         required={required}
         onChange={onChange ? (e) => onChange(e.target.value) : undefined}
-        className={`${className ?? dateCls} pl-10 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0`}
+        className={`${
+          className ?? dateCls
+        } pl-10 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0`}
       />
     </div>
   );
 }
 
-export function ReservationManager({ res, mode, onViewPayment }: ReservationManagerProps) {
+export function ReservationManager({
+  res,
+  mode,
+  onViewPayment,
+  staffMode = false,
+}: ReservationManagerProps) {
   const qc = useQueryClient();
 
   const { data: profiles = {} } = useProfiles();
@@ -223,7 +219,7 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
   const todaysSessions = overviewRows.filter((r) => r.booking_date === today).length;
 
   const list = useMemo(() => {
-    const s = q.trim().toLowerCase();
+    const search = q.trim().toLowerCase();
 
     return res
       .filter((r) => allowedStatuses.includes(r.status))
@@ -232,12 +228,12 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
       .filter((r) => !toDate || r.booking_date <= toDate)
       .filter((r) => room === "all" || r.room_id === room)
       .filter((r) => {
-        if (!s) return true;
+        if (!search) return true;
 
-        const p = profiles[r.user_id];
+        const profile = profiles[r.user_id];
 
-        return [r.reference_code, p?.full_name, p?.phone, p?.email].some((x) =>
-          x?.toLowerCase().includes(s),
+        return [r.reference_code, profile?.full_name, profile?.phone, profile?.email].some(
+          (value) => value?.toLowerCase().includes(search),
         );
       })
       .sort((a, b) =>
@@ -252,6 +248,7 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
   }, [q, status, fromDate, toDate, room, sort]);
 
   const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+
   const currentPage = Math.min(page, totalPages);
 
   const paginatedList = useMemo(() => {
@@ -266,19 +263,19 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
   };
 
   const conflict = (
-    r: ResRow,
-    roomId = r.room_id,
-    start = r.start_time,
-    end = r.end_time,
-    day = r.booking_date,
+    reservation: ResRow,
+    roomId = reservation.room_id,
+    start = reservation.start_time,
+    end = reservation.end_time,
+    day = reservation.booking_date,
   ) =>
     res.find(
-      (o) =>
-        o.id !== r.id &&
-        o.room_id === roomId &&
-        o.booking_date === day &&
-        BLOCKING.includes(o.status) &&
-        overlaps(start, end, o.start_time, o.end_time),
+      (other) =>
+        other.id !== reservation.id &&
+        other.room_id === roomId &&
+        other.booking_date === day &&
+        BLOCKING.includes(other.status) &&
+        overlaps(start, end, other.start_time, other.end_time),
     );
 
   const update = async (
@@ -305,20 +302,25 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
     setOpen(null);
 
     await qc.invalidateQueries({
-      queryKey: ["admin-res"],
+      queryKey: [staffMode ? "staff-reservations" : "admin-res"],
     });
 
     return true;
   };
 
   const approve = async (r: ResRow) => {
-    const c = conflict(r);
+    if (r.status !== "pending") {
+      toast.error("Only pending reservations can be approved.");
+      return;
+    }
 
-    if (c) {
+    const existingConflict = conflict(r);
+
+    if (existingConflict) {
       toast.error(
-        `Room already booked ${fmtTime(c.start_time)}–${fmtTime(
-          c.end_time,
-        )} (${c.reference_code}).`,
+        `Room already booked ${fmtTime(
+          existingConflict.start_time,
+        )}–${fmtTime(existingConflict.end_time)} (${existingConflict.reference_code}).`,
       );
       return;
     }
@@ -357,6 +359,11 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
   };
 
   const checkout = async (r: ResRow) => {
+    if (r.status !== "checked_in") {
+      toast.error("Only checked-in reservations can be checked out.");
+      return;
+    }
+
     if (
       r.payment_status !== "paid" &&
       !window.confirm(
@@ -460,7 +467,7 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
         <Eye className="h-4 w-4" />
       </Button>
 
-      {r.status === "pending" && (
+      {r.status === "pending" && mode === "all" && (
         <Button
           type="button"
           size="icon"
@@ -504,7 +511,7 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
         Details
       </Button>
 
-      {r.status === "pending" && (
+      {r.status === "pending" && mode === "all" && (
         <Button
           type="button"
           size="sm"
@@ -623,7 +630,6 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3">
-        {/* Search */}
         <div className="relative min-w-[220px] flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 
@@ -636,13 +642,13 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
           />
         </div>
 
-        {/* DATE RANGE */}
+        {/* Date range */}
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
-          {/* From Date */}
           <div className="min-w-0 space-y-1 sm:w-[150px]">
             <Label htmlFor={`${mode}-from-date`} className="text-xs text-muted-foreground">
               From date
             </Label>
+
             <Input
               id={`${mode}-from-date`}
               type="date"
@@ -653,11 +659,11 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
             />
           </div>
 
-          {/* To Date */}
           <div className="min-w-0 space-y-1 sm:w-[150px]">
             <Label htmlFor={`${mode}-to-date`} className="text-xs text-muted-foreground">
               To date
             </Label>
+
             <Input
               id={`${mode}-to-date`}
               type="date"
@@ -669,7 +675,6 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
           </div>
         </div>
 
-        {/* Filter */}
         <Button variant="outline" onClick={() => setFilterOpen(true)} className="shrink-0">
           <Filter className="mr-2 h-4 w-4" />
           Filter
@@ -708,16 +713,16 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
           <table className="w-full whitespace-nowrap text-sm">
             <thead className="bg-secondary/50 text-left text-muted-foreground">
               <tr>
-                {headers.map((h) => (
+                {headers.map((header) => (
                   <th
-                    key={h}
+                    key={header}
                     className={`p-3 font-medium ${
-                      h === "Status" || h === "Action" ? "text-right" : ""
-                    } ${h === "Status" ? "font-semibold text-foreground" : ""} ${
-                      h === "Date Submitted" ? "w-[130px] max-w-[130px] text-xs" : ""
+                      header === "Status" || header === "Action" ? "text-right" : ""
+                    } ${header === "Status" ? "font-semibold text-foreground" : ""} ${
+                      header === "Date Submitted" ? "w-[130px] max-w-[130px] text-xs" : ""
                     }`}
                   >
-                    {h}
+                    {header}
                   </th>
                 ))}
               </tr>
@@ -733,19 +738,28 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
               )}
 
               {paginatedList.map((r) => {
-                const p = profiles[r.user_id];
+                const profile = profiles[r.user_id];
 
                 return (
                   <tr key={r.id} className="border-t border-border hover:bg-secondary/30">
                     <td className="p-3 font-medium">{r.reference_code}</td>
-                    <td className="p-3">{p?.full_name ?? "Guest"}</td>
-                    <td className="p-3">{p?.phone ?? "—"}</td>
+
+                    <td className="p-3">{profile?.full_name ?? "Guest"}</td>
+
+                    <td className="p-3">{profile?.phone ?? "—"}</td>
+
                     <td className="p-3">{r.rooms?.name ?? "—"}</td>
+
                     <td className="p-3">{fmtDate(r.booking_date)}</td>
+
                     <td className="p-3">{fmtTime(r.start_time)}</td>
+
                     <td className="p-3">{fmtTime(r.end_time)}</td>
+
                     <td className="p-3">{durationHours(r.start_time, r.end_time)}</td>
+
                     <td className="p-3">{r.guest_count}</td>
+
                     <td className="p-3">{peso(r.room_total)}</td>
 
                     <td className="w-[130px] max-w-[130px] p-3 text-xs text-muted-foreground">
@@ -755,6 +769,7 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
                     </td>
 
                     <td className="p-3">{listActions(r)}</td>
+
                     <td className="p-3 text-right">{statusDisplay(r)}</td>
                   </tr>
                 );
@@ -774,15 +789,16 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {paginatedList.map((r) => {
-                const p = profiles[r.user_id];
+                const profile = profiles[r.user_id];
 
                 return (
                   <div key={r.id} className="rounded-xl border border-border bg-card p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="font-semibold">{r.reference_code}</p>
+
                         <p className="mt-1 truncate text-sm text-muted-foreground">
-                          {p?.full_name ?? "Guest"}
+                          {profile?.full_name ?? "Guest"}
                         </p>
                       </div>
 
@@ -790,54 +806,27 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
                     </div>
 
                     <div className="my-4 grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Room</p>
-                        <p className="mt-1 font-medium">{r.rooms?.name ?? "—"}</p>
-                      </div>
+                      <InfoItem label="Room" value={r.rooms?.name ?? "—"} />
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">Contact</p>
-                        <p className="mt-1 font-medium">{p?.phone ?? "—"}</p>
-                      </div>
+                      <InfoItem label="Contact" value={profile?.phone ?? "—"} />
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">Date</p>
-                        <p className="mt-1 font-medium">{fmtDate(r.booking_date)}</p>
-                      </div>
+                      <InfoItem label="Date" value={fmtDate(r.booking_date)} />
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">Time</p>
-                        <p className="mt-1 font-medium">
-                          {fmtTime(r.start_time)} – {fmtTime(r.end_time)}
-                        </p>
-                      </div>
+                      <InfoItem
+                        label="Time"
+                        value={`${fmtTime(r.start_time)} – ${fmtTime(r.end_time)}`}
+                      />
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">Duration</p>
-                        <p className="mt-1 font-medium">
-                          {durationHours(r.start_time, r.end_time)} hours
-                        </p>
-                      </div>
+                      <InfoItem
+                        label="Duration"
+                        value={`${durationHours(r.start_time, r.end_time)} hours`}
+                      />
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">Guests</p>
-                        <p className="mt-1 font-medium">{r.guest_count}</p>
-                      </div>
+                      <InfoItem label="Guests" value={String(r.guest_count)} />
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">Total</p>
-                        <p className="mt-1 font-semibold">{peso(r.room_total)}</p>
-                      </div>
+                      <InfoItem label="Total" value={peso(r.room_total)} strong />
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">Date Submitted</p>
-                        <p
-                          className="mt-1 truncate text-xs font-medium"
-                          title={fmtStamp(r.created_at)}
-                        >
-                          {fmtStamp(r.created_at)}
-                        </p>
-                      </div>
+                      <InfoItem label="Date Submitted" value={fmtStamp(r.created_at)} small />
                     </div>
 
                     <div className="border-t border-border pt-3">{gridActions(r)}</div>
@@ -952,7 +941,7 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
       />
 
       {/* Reject reservation dialog */}
-      <Dialog open={!!rejecting} onOpenChange={(o) => !o && setRejecting(null)}>
+      <Dialog open={!!rejecting} onOpenChange={(isOpen) => !isOpen && setRejecting(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Reject {rejecting?.reference_code}</DialogTitle>
@@ -977,6 +966,11 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
               onClick={async () => {
                 if (!rejecting) return;
 
+                if (rejecting.status !== "pending") {
+                  toast.error("Only pending reservations can be rejected.");
+                  return;
+                }
+
                 const ok = await update(rejecting.id, {
                   status: "rejected",
                   rejection_reason: reason.trim(),
@@ -995,7 +989,7 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
       </Dialog>
 
       {/* Edit reservation dialog */}
-      <Dialog open={!!moving} onOpenChange={(o) => !o && setMoving(null)}>
+      <Dialog open={!!moving} onOpenChange={(isOpen) => !isOpen && setMoving(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit {moving?.reference_code}</DialogTitle>
@@ -1013,42 +1007,47 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
                   return;
                 }
 
-                const f = new FormData(e.currentTarget);
+                const form = new FormData(e.currentTarget);
 
-                const roomId = String(f.get("room"));
-                const day = String(f.get("date"));
-                const start = String(f.get("start")).slice(0, 5) + ":00";
-                const end = String(f.get("end")).slice(0, 5) + ":00";
+                const roomId = String(form.get("room"));
+                const day = String(form.get("date"));
+                const start = String(form.get("start")).slice(0, 5) + ":00";
+                const end = String(form.get("end")).slice(0, 5) + ":00";
 
-                const rm = rooms.find((x) => x.id === roomId);
+                const selectedRoom = rooms.find((r) => r.id === roomId);
 
-                if (!rm) {
-                  return void toast.error("Please select a valid room.");
+                if (!selectedRoom) {
+                  toast.error("Please select a valid room.");
+                  return;
                 }
 
                 if (!day) {
-                  return void toast.error("Please select a booking date.");
+                  toast.error("Please select a booking date.");
+                  return;
                 }
 
                 if (end <= start) {
-                  return void toast.error("End time must be after start time.");
+                  toast.error("End time must be after start time.");
+                  return;
                 }
 
-                if (moving.guest_count > rm.capacity) {
-                  return void toast.error(`${rm.name} fits only ${rm.capacity} guests.`);
+                if (moving.guest_count > selectedRoom.capacity) {
+                  toast.error(`${selectedRoom.name} fits only ${selectedRoom.capacity} guests.`);
+                  return;
                 }
 
-                const c = conflict(moving, roomId, start, end, day);
+                const existingConflict = conflict(moving, roomId, start, end, day);
 
-                if (c) {
-                  return void toast.error(
-                    `Clashes with ${c.reference_code} (${fmtTime(
-                      c.start_time,
-                    )}–${fmtTime(c.end_time)}).`,
+                if (existingConflict) {
+                  toast.error(
+                    `Clashes with ${existingConflict.reference_code} (${fmtTime(
+                      existingConflict.start_time,
+                    )}–${fmtTime(existingConflict.end_time)}).`,
                   );
+                  return;
                 }
 
-                const rate = Number(rm.hourly_rate);
+                const rate = Number(selectedRoom.hourly_rate);
 
                 const ok = await update(moving.id, {
                   room_id: roomId,
@@ -1147,7 +1146,33 @@ export function ReservationManager({ res, mode, onViewPayment }: ReservationMana
   );
 }
 
-// Overview card component.
+function InfoItem({
+  label,
+  value,
+  strong = false,
+  small = false,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+  small?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+
+      <p
+        className={`mt-1 ${
+          strong ? "font-semibold" : "font-medium"
+        } ${small ? "truncate text-xs" : ""}`}
+        title={value}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function OverviewCard({
   title,
   value,

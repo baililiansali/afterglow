@@ -16,6 +16,7 @@ import { Staff } from "@/components/admin/Staff";
 import { Messages } from "@/components/admin/Messages";
 import { Reports } from "@/components/admin/Reports";
 import { SettingsAdmin } from "@/components/admin/SettingsAdmin";
+import { ExpenseLiquidation } from "@/components/admin/ExpenseLiquidation";
 
 import {
   AdminShell,
@@ -46,7 +47,12 @@ export const Route = createFileRoute("/admin")({
   }),
 
   validateSearch: (s: Record<string, unknown>): { section?: SectionKey } =>
-    typeof s["section"] === "string" && s["section"] in SECTION_TITLES
+    typeof s["section"] === "string" &&
+    s["section"] in SECTION_TITLES &&
+    s["section"] !== "sessions" &&
+    s["section"] !== "schedule" &&
+    s["section"] !== "bookings" &&
+    s["section"] !== "orders"
       ? { section: s["section"] as SectionKey }
       : {},
 
@@ -158,6 +164,8 @@ function Admin() {
 
     staff: <Staff />,
 
+    expenses: <ExpenseLiquidation />,
+
     messages: <Messages />,
 
     reports: <Reports res={res} orders={orders} />,
@@ -166,7 +174,13 @@ function Admin() {
   };
 
   return (
-    <AdminShell section={section} onSection={handleSectionChange} res={res} orders={orders}>
+    <AdminShell
+      mode="admin"
+      section={section}
+      onSection={handleSectionChange}
+      res={res}
+      orders={orders}
+    >
       <div className="mx-auto max-w-6xl">{panels[section]}</div>
     </AdminShell>
   );

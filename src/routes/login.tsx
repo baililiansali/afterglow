@@ -1,9 +1,11 @@
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
 import { supabase } from "@/integrations/supabase/client";
 import { errMsg } from "@/lib/afterglow";
 import { useRedirectAdmin } from "@/components/SiteChrome";
@@ -27,11 +29,14 @@ type Mode = "signin" | "signup" | "forgot";
 
 function Login() {
   useRedirectAdmin();
+
   const [mode, setMode] = useState<Mode>("signin");
   const hash = useLocation({ select: (l) => l.hash });
+
   useEffect(() => {
     setMode(hash === "signup" ? "signup" : "signin");
   }, [hash]);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -39,46 +44,75 @@ function Login() {
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<string | null>(null);
+
   const navigate = useNavigate();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
+
     try {
       if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
         if (error) throw error;
+
         const {
           data: { user },
+          error: userError,
         } = await supabase.auth.getUser();
-        let admin = false;
+
+        if (userError) throw userError;
+
+        let destination: "/admin" | "/staff" | "/" = "/";
+
         if (user) {
-          const { data: role } = await supabase
+          const { data: roles, error: roleError } = await supabase
             .from("user_roles")
             .select("role")
             .eq("user_id", user.id)
-            .eq("role", "admin")
-            .maybeSingle();
-          admin = !!role;
+            .in("role", ["admin", "staff"]);
+
+          if (roleError) throw roleError;
+
+          const isAdmin = roles?.some((item) => item.role === "admin");
+          const isStaff = roles?.some((item) => item.role === "staff");
+
+          if (isAdmin) {
+            destination = "/admin";
+          } else if (isStaff) {
+            destination = "/staff";
+          }
         }
+
         toast.success("Welcome back!");
-        navigate({ to: admin ? "/admin" : "/" });
+        navigate({ to: destination });
       } else if (mode === "signup") {
         const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             emailRedirectTo: window.location.origin,
-            data: { full_name: `${name.trim()} ${lastName.trim()}`.trim(), phone },
+            data: {
+              full_name: `${name.trim()} ${lastName.trim()}`.trim(),
+              phone,
+            },
           },
         });
+
         if (error) throw error;
+
         setSent("Check your email to confirm your account, then sign in.");
       } else {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/reset-password`,
         });
+
         if (error) throw error;
+
         setSent("If that email has an account, a reset link is on its way.");
       }
     } catch (err) {
@@ -98,9 +132,11 @@ function Login() {
               ? "Create account"
               : "Reset password"}
         </h1>
+
         {sent ? (
           <div className="mt-6">
             <p className="text-muted-foreground">{sent}</p>
+
             <Button
               variant="outline"
               className="mt-6"
@@ -119,13 +155,27 @@ function Login() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label htmlFor="first">First name</Label>
-                    <Input id="first" required maxLength={50} value={name} onChange={(e) => setName(e.target.value)} />
+                    <Input
+                      id="first"
+                      required
+                      maxLength={50}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
                   </div>
+
                   <div>
                     <Label htmlFor="last">Last name</Label>
-                    <Input id="last" required maxLength={50} value={lastName} onChange={(e) => setLastName(e.target.value)} />
+                    <Input
+                      id="last"
+                      required
+                      maxLength={50}
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                    />
                   </div>
                 </div>
+
                 <div>
                   <Label htmlFor="phone">Phone</Label>
                   <Input
@@ -137,6 +187,7 @@ function Login() {
                 </div>
               </>
             )}
+
             <div>
               <Label htmlFor="email">Email</Label>
               <Input
@@ -147,6 +198,7 @@ function Login() {
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
+
             {mode !== "forgot" && (
               <div>
                 <Label htmlFor="pw">Password</Label>
@@ -160,6 +212,7 @@ function Login() {
                 />
               </div>
             )}
+
             <Button type="submit" variant="glow" className="w-full" disabled={busy}>
               {busy
                 ? "Please wait…"
@@ -171,6 +224,7 @@ function Login() {
             </Button>
           </form>
         )}
+
         {!sent && (
           <div className="mt-6 flex flex-col gap-2 text-sm text-muted-foreground">
             {mode === "signin" && (
@@ -181,6 +235,7 @@ function Login() {
                 >
                   Forgot password?
                 </button>
+
                 <p>
                   New here?{" "}
                   <button className="text-primary" onClick={() => setMode("signup")}>
@@ -189,6 +244,7 @@ function Login() {
                 </p>
               </>
             )}
+
             {mode !== "signin" && (
               <button className="text-left text-primary" onClick={() => setMode("signin")}>
                 Back to sign in
@@ -197,6 +253,7 @@ function Login() {
           </div>
         )}
       </div>
+
       <p className="mt-6 text-center text-xs text-muted-foreground">
         By continuing you agree to our{" "}
         <Link to="/policies" className="underline">
