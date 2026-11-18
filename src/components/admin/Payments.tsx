@@ -142,13 +142,9 @@ export function Payments({
   const [status, setStatus] = useState<PaymentStatus>("all");
   const [method, setMethod] = useState<PaymentMethod>("all");
 
-  const [draftStatus, setDraftStatus] = useState<PaymentStatus>("all");
-  const [draftMethod, setDraftMethod] = useState<PaymentMethod>("all");
-
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-  const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState("");
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -348,8 +344,6 @@ export function Payments({
   function resetFilters() {
     setStatus("all");
     setMethod("all");
-    setDraftStatus("all");
-    setDraftMethod("all");
     setFromDate("");
     setToDate("");
     setSearch("");
@@ -416,24 +410,9 @@ export function Payments({
     resetFilters();
   };
 
-  const openFilters = () => {
-    setDraftStatus(status);
-    setDraftMethod(method);
-    setFilterOpen(true);
-  };
-
-  const applyFilters = () => {
-    setStatus(draftStatus);
-    setMethod(draftMethod);
-    setCurrentPage(1);
-    setFilterOpen(false);
-  };
-
   const clearFilters = () => {
     setStatus("all");
     setMethod("all");
-    setDraftStatus("all");
-    setDraftMethod("all");
     setFromDate("");
     setToDate("");
     setCurrentPage(1);
@@ -953,8 +932,8 @@ export function Payments({
 
       {/* TOOLBAR */}
       <div className="rounded-xl border border-border bg-card p-3">
-        <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-end">
-          <div className="relative min-w-0 flex-1">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
+          <div className="relative min-w-0 flex-1 xl:min-w-[200px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder={
@@ -1007,30 +986,66 @@ export function Payments({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" className="h-10" onClick={openFilters}>
-              <Filter className="mr-2 h-4 w-4" />
-              Filter
+          <div className="flex flex-wrap items-end gap-2 xl:shrink-0">
+            <div className="flex h-10 items-center gap-2 text-sm text-muted-foreground">
+              <Filter className="h-4 w-4" />
+              <span>Filter</span>
               {hasActiveFilters && (
-                <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
                   {activeFilterCount}
                 </span>
               )}
-            </Button>
+            </div>
 
-            {(fromDate || toDate) && (
+            <Select
+              value={status}
+              onValueChange={(value) => {
+                setStatus(value as PaymentStatus);
+                setCurrentPage(1);
+              }}
+            >
+              <SelectTrigger
+                aria-label="Filter by payment status"
+                className="h-10 w-[130px] justify-between text-sm"
+              >
+                <SelectValue placeholder="Payment status" />
+              </SelectTrigger>
+              <SelectContent position="popper" className="max-h-60">
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="unpaid">Unpaid</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={method}
+              onValueChange={(value) => {
+                setMethod(value as PaymentMethod);
+                setCurrentPage(1);
+              }}
+            >
+              <SelectTrigger
+                aria-label="Filter by payment method"
+                className="h-10 w-[130px] justify-between text-sm"
+              >
+                <SelectValue placeholder="Payment method" />
+              </SelectTrigger>
+              <SelectContent position="popper" className="max-h-60">
+                <SelectItem value="all">All methods</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="gcash">GCash</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {hasActiveFilters && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className="h-10 whitespace-nowrap text-muted-foreground hover:bg-secondary hover:text-foreground"
-                onClick={() => {
-                  setFromDate("");
-                  setToDate("");
-                  setCurrentPage(1);
-                }}
+                onClick={clearFilters}
               >
-                Clear dates
+                Clear
               </Button>
             )}
           </div>
@@ -1061,69 +1076,6 @@ export function Payments({
         </div>
       </div>
 
-      {/* FILTER DIALOG */}
-      <Dialog open={filterOpen} onOpenChange={setFilterOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Transaction Filters</DialogTitle>
-            <DialogDescription>
-              Filter transactions by payment status and payment method.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="payment-status-filter">Payment Status</Label>
-              <Select
-                value={draftStatus}
-                onValueChange={(value) => setDraftStatus(value as PaymentStatus)}
-              >
-                <SelectTrigger
-                  id="payment-status-filter"
-                  className="h-10 w-full justify-between text-sm"
-                >
-                  <SelectValue placeholder="Select payment status" />
-                </SelectTrigger>
-                <SelectContent position="popper" className="max-h-60">
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="paid">Paid</SelectItem>
-                  <SelectItem value="unpaid">Unpaid</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="payment-method-filter">Payment Method</Label>
-              <Select
-                value={draftMethod}
-                onValueChange={(value) => setDraftMethod(value as PaymentMethod)}
-              >
-                <SelectTrigger
-                  id="payment-method-filter"
-                  className="h-10 w-full justify-between text-sm"
-                >
-                  <SelectValue placeholder="Select payment method" />
-                </SelectTrigger>
-                <SelectContent position="popper" className="max-h-60">
-                  <SelectItem value="all">All methods</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="gcash">GCash</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex justify-between gap-2 border-t border-border pt-4">
-              <Button type="button" variant="ghost" onClick={clearFilters}>
-                Clear all
-              </Button>
-              <Button type="button" onClick={applyFilters}>
-                Apply filters
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
       {/* TRANSACTION RECORDS */}
       {filteredTransactions.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-muted-foreground">
@@ -1132,7 +1084,7 @@ export function Payments({
           <p className="mt-1 text-xs">Try changing your search or filters.</p>
         </div>
       ) : viewMode === "grid" ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
           {paginatedTransactions.map(renderGridCard)}
         </div>
       ) : (

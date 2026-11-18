@@ -122,6 +122,11 @@
   }
 }
 
+.login-password-input::-ms-reveal,
+.login-password-input::-ms-clear {
+  display: none;
+}
+
 @utility text-gradient-glow {
   background: linear-gradient(100deg, var(--primary), var(--glow), var(--accent));
   -webkit-background-clip: text;
