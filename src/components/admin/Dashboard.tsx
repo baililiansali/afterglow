@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { fmtDate, peso } from "@/lib/afterglow";
 import { useAuth } from "@/lib/auth";
 import { useMyProfile } from "@/lib/avatar";
+import { calculateCollectedRevenue } from "@/lib/revenue";
 import type { SectionKey } from "./AdminShell";
 import type { OrderRow, ResRow } from "./shared";
 
@@ -122,7 +123,7 @@ function FinancialChart({
 
       <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
         <span className={`h-2.5 w-2.5 rounded-sm ${isProfit ? "bg-glow" : "bg-primary"}`} />
-        {isProfit ? "Daily profit" : "Daily revenue"}
+        {isProfit ? "Daily profit" : "Daily collected revenue"}
 
         {isProfit && (
           <>
@@ -130,6 +131,85 @@ function FinancialChart({
             Negative profit
           </>
         )}
+      </div>
+    </Panel>
+  );
+}
+
+function RevenueBreakdownChart({
+  roomRevenue,
+  foodRevenue,
+}: {
+  roomRevenue: number;
+  foodRevenue: number;
+}) {
+  const total = roomRevenue + foodRevenue;
+
+  const roomPercentage = total > 0 ? (roomRevenue / total) * 100 : 0;
+  const foodPercentage = total > 0 ? (foodRevenue / total) * 100 : 0;
+
+  const chartBackground =
+    total > 0
+      ? `conic-gradient(#A78BFA 0% ${roomPercentage}%, #F59E0B ${roomPercentage}% 100%)`
+      : "conic-gradient(hsl(var(--muted)) 0% 100%)";
+
+  return (
+    <Panel title="Revenue Breakdown">
+      <p className="mb-5 text-xs text-muted-foreground">
+        Collected revenue from room reservations and food orders.
+      </p>
+
+      <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-around">
+        {/* Doughnut chart */}
+        <div className="relative h-48 w-48 shrink-0">
+          <div className="h-full w-full rounded-full" style={{ background: chartBackground }} />
+
+          <div className="absolute inset-[22%] flex flex-col items-center justify-center rounded-full bg-card">
+            <span className="text-[10px] text-muted-foreground">Total Collected</span>
+            <span className="mt-1 text-center font-display text-lg font-bold">{peso(total)}</span>
+          </div>
+        </div>
+
+        {/* Revenue details */}
+        <div className="w-full space-y-5 sm:max-w-[220px]">
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 shrink-0 rounded-sm bg-[#A78BFA]" />
+                <span className="text-sm font-medium">Room Revenue</span>
+              </div>
+
+              <span className="text-xs text-muted-foreground">{roomPercentage.toFixed(1)}%</span>
+            </div>
+
+            <p className="text-xl font-bold">{peso(roomRevenue)}</p>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary">
+              <div
+                className="h-full rounded-full bg-[#A78BFA]"
+                style={{ width: `${roomPercentage}%` }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 shrink-0 rounded-sm bg-[#F59E0B]" />
+                <span className="text-sm font-medium">Food Revenue</span>
+              </div>
+
+              <span className="text-xs text-muted-foreground">{foodPercentage.toFixed(1)}%</span>
+            </div>
+
+            <p className="text-xl font-bold">{peso(foodRevenue)}</p>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary">
+              <div
+                className="h-full rounded-full bg-[#F59E0B]"
+                style={{ width: `${foodPercentage}%` }}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </Panel>
   );
@@ -168,32 +248,14 @@ export function Dashboard({
     },
   });
 
-  // Today's revenue from paid room reservations.
-  const todayRoomRevenue = res
-    .filter((r) => r.booking_date === today && r.payment_status === "paid")
-    .reduce((sum, r) => sum + Number(r.room_total), 0);
-
-  // Today's revenue from paid food orders linked to today's reservations.
-  const todayFoodRevenue = orders
-    .filter((o) => o.payment_status === "paid" && o.reservations?.booking_date === today)
-    .reduce((sum, o) => sum + Number(o.food_subtotal), 0);
-
-  const todayRevenue = todayRoomRevenue + todayFoodRevenue;
-
-  // Total revenue from paid room reservations.
-  const totalRoomRevenue = res
-    .filter((r) => r.payment_status === "paid")
-    .reduce((sum, r) => sum + Number(r.room_total), 0);
-
-  // Total revenue from paid food orders.
-  const totalFoodRevenue = orders
-    .filter((o) => o.payment_status === "paid")
-    .reduce((sum, o) => sum + Number(o.food_subtotal), 0);
-
-  const totalRevenue = totalRoomRevenue + totalFoodRevenue;
+  const todayRevenue = calculateCollectedRevenue(
+    res.filter((reservation) => reservation.booking_date === today),
+    orders.filter((order) => order.reservations?.booking_date === today),
+  ).totalRevenue;
+  const totalRevenue = calculateCollectedRevenue(res, orders);
+  const totalCollected = totalRevenue.totalRevenue;
 
   // Only Salary, Maintenance, and Damages count toward dashboard expenses.
-  // Damages are included in Maintenance and counted exactly once.
   const includedExpenses = expenses.filter(
     (expense) =>
       expense.category === "salary" ||
@@ -203,30 +265,27 @@ export function Dashboard({
 
   const totalExpenses = includedExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
 
-  // Total profit = total revenue - included expenses.
-  const totalProfit = totalRevenue - totalExpenses;
+  // Total profit = total collected - included expenses.
+  const totalProfit = totalCollected - totalExpenses;
 
   // Last seven days for financial charts.
   const chartDays = getLastSevenDays(today);
 
-  // Daily revenue from paid room reservations and food orders.
+  // Daily collected revenue from paid room reservations and food orders.
   const revenueTrend: FinancialDay[] = chartDays.map((day) => {
-    const roomRevenue = res
-      .filter((r) => r.booking_date === day.date && r.payment_status === "paid")
-      .reduce((sum, r) => sum + Number(r.room_total), 0);
-
-    const foodRevenue = orders
-      .filter((o) => o.payment_status === "paid" && o.reservations?.booking_date === day.date)
-      .reduce((sum, o) => sum + Number(o.food_subtotal), 0);
+    const revenue = calculateCollectedRevenue(
+      res.filter((reservation) => reservation.booking_date === day.date),
+      orders.filter((order) => order.reservations?.booking_date === day.date),
+    );
 
     return {
       date: day.date,
       label: day.label,
-      value: roomRevenue + foodRevenue,
+      value: revenue.totalRevenue,
     };
   });
 
-  // Daily profit = daily revenue - Salary, Maintenance, and Damages.
+  // Daily profit = daily collected revenue - Salary, Maintenance, and Damages.
   const profitTrend: FinancialDay[] = chartDays.map((day, index) => {
     const dailyExpenses = expenses
       .filter(
@@ -256,30 +315,30 @@ export function Dashboard({
 
   const stats = [
     {
-      l: "Today's revenue",
+      l: "Today's Revenue",
       v: peso(todayRevenue),
       sub: "Payments collected today",
       icon: Wallet,
       tone: "text-accent",
     },
     {
-      l: "Total revenue",
-      v: peso(totalRevenue),
-      sub: "All paid bookings and orders",
-      icon: TrendingUp,
+      l: "Total Collected",
+      v: peso(totalCollected),
+      sub: "Room revenue + food revenue",
+      icon: Wallet,
       tone: "text-primary",
     },
     {
-      l: "Total expenses",
+      l: "Total Expenses",
       v: peso(totalExpenses),
       sub: "Salary, maintenance and damages",
       icon: Receipt,
       tone: "text-destructive",
     },
     {
-      l: "Total profit",
+      l: "Total Profit",
       v: peso(totalProfit),
-      sub: "Revenue minus expenses",
+      sub: "Total collected minus expenses",
       icon: TrendingUp,
       tone: totalProfit >= 0 ? "text-glow" : "text-destructive",
     },
@@ -303,7 +362,7 @@ export function Dashboard({
       </div>
 
       {/* Financial summary cards */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {stats.map((s) => (
           <div key={s.l} className="rounded-2xl border border-border bg-card p-4">
             <div className="flex items-start justify-between gap-2">
@@ -321,6 +380,12 @@ export function Dashboard({
         ))}
       </div>
 
+      {/* Revenue breakdown */}
+      <RevenueBreakdownChart
+        roomRevenue={totalRevenue.roomRevenue}
+        foodRevenue={totalRevenue.foodRevenue}
+      />
+
       {/* Financial and reservation charts */}
       <div className="grid gap-6 xl:grid-cols-2">
         {/* Left column: Revenue and Profit charts */}
@@ -334,7 +399,7 @@ export function Dashboard({
 
           <FinancialChart
             title="Profit Trend · last 7 days"
-            description="Daily revenue minus Salary, Maintenance, and Damages recorded for each day."
+            description="Daily collected revenue minus Salary, Maintenance, and Damages recorded for each day."
             data={profitTrend}
             variant="profit"
           />

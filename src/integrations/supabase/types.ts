@@ -487,6 +487,16 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      accept_payment: {
+        Args: {
+          _target_id: string;
+          _target_type: string;
+        };
+        Returns: {
+          id: string;
+          payment_status: Database["public"]["Enums"]["payment_status"];
+        }[];
+      };
       cancel_my_reservation: {
         Args: { _reservation_id: string };
         Returns: undefined;

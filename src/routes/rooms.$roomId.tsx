@@ -9,14 +9,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useRedirectAdmin } from "@/components/SiteChrome";
 import { supabase } from "@/integrations/supabase/client";
-import { ROOM_IMAGES, errMsg, fmtDate, fmtTime, foodImage, overlaps, peso } from "@/lib/afterglow";
+import { ROOM_IMAGES, errMsg, fmtDate, fmtTime, foodImage, peso } from "@/lib/afterglow";
 import {
   addHours,
   busySlotsQuery,
+  canFitDuration,
   hourOptions,
   menuQuery,
   roomQuery,
   settingsQuery,
+  timeToMinutes,
 } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
 import { cartPayload, useCart } from "@/lib/cart";
@@ -91,14 +93,26 @@ function isPastStart(date: string, start: string) {
   return `${start}:00` <= now.time;
 }
 
+/**
+ * Compare reservations using a continuous timeline.
+ *
+ * The busy-slot query can return values such as 24:00 and 27:00
+ * for intervals that continue into the following calendar day.
+ */
 function isSlotTaken(
   slots: { start_time: string; end_time: string }[],
   start: string,
   hours: number,
 ) {
-  const end = addHours(start, hours);
+  const requestedStart = timeToMinutes(start);
+  const requestedEnd = requestedStart + hours * 60;
 
-  return slots.some((slot) => overlaps(`${start}:00`, `${end}:00`, slot.start_time, slot.end_time));
+  return slots.some((slot) => {
+    const busyStart = timeToMinutes(slot.start_time);
+    const busyEnd = timeToMinutes(slot.end_time);
+
+    return requestedStart < busyEnd && requestedEnd > busyStart;
+  });
 }
 
 function isOverlapDatabaseError(error: unknown) {
@@ -262,9 +276,7 @@ function GCashDetails({
           {proof ? (
             <>
               <ImageIcon className="mb-2 h-7 w-7 text-primary" />
-
               <span className="max-w-full break-all text-sm font-medium">{proof.name}</span>
-
               <span className="mt-1 text-xs text-muted-foreground">
                 {(proof.size / 1024 / 1024).toFixed(2)} MB · Click to change
               </span>
@@ -272,9 +284,7 @@ function GCashDetails({
           ) : (
             <>
               <Upload className="mb-2 h-7 w-7 text-muted-foreground" />
-
               <span className="text-sm font-medium">Choose payment screenshot</span>
-
               <span className="mt-1 text-xs text-muted-foreground">
                 JPG, PNG, or WEBP · Maximum 5 MB
               </span>
@@ -337,12 +347,8 @@ function RoomPage() {
   const [roomPayRef, setRoomPayRef] = useState("");
   const [roomProof, setRoomProof] = useState<ProofFile>(null);
 
-  // Independent food payment details
+  // Food payment can be completed only after the room payment is verified.
   const [foodPayment, setFoodPayment] = useState<PaymentMethod>("cash");
-  const [foodPayerName, setFoodPayerName] = useState("");
-  const [foodPayerAccount, setFoodPayerAccount] = useState("");
-  const [foodPayRef, setFoodPayRef] = useState("");
-  const [foodProof, setFoodProof] = useState<ProofFile>(null);
 
   const [receipt, setReceipt] = useState<null | {
     ref: string;
@@ -353,7 +359,6 @@ function RoomPage() {
     roomPayment: PaymentMethod;
     foodPayment: PaymentMethod | null;
     roomProofMessage: string | null;
-    foodProofMessage: string | null;
     roomTotal: number;
     foodTotal: number;
     items: {
@@ -371,8 +376,6 @@ function RoomPage() {
     () => (settings ? hourOptions(settings.opening_time, settings.closing_time) : []),
     [settings],
   );
-
-  const closeH = settings ? Number(settings.closing_time.slice(0, 2)) : 23;
 
   const maxH = settings?.max_duration_hours ?? 6;
   const minH = settings?.min_duration_hours ?? 1;
@@ -396,11 +399,12 @@ function RoomPage() {
 
   const bookable = room.is_active && !room.maintenance_status;
 
-  const validDurations = start
-    ? Array.from({ length: Math.max(0, maxH - minH + 1) }, (_, i) => minH + i).filter(
-        (h) => Number(start.slice(0, 2)) + h <= closeH,
-      )
-    : [];
+  const validDurations =
+    start && settings
+      ? Array.from({ length: Math.max(0, maxH - minH + 1) }, (_, i) => minH + i).filter((h) =>
+          canFitDuration(settings.opening_time, settings.closing_time, start, h),
+        )
+      : [];
 
   const roomTotal = room.hourly_rate * hours;
   const foodTotal = cart.subtotal;
@@ -464,7 +468,7 @@ function RoomPage() {
       return "The selected reservation duration is not allowed.";
     }
 
-    if (Number(start.slice(0, 2)) + hours > closeH) {
+    if (!settings || !canFitDuration(settings.opening_time, settings.closing_time, start, hours)) {
       return "Your reservation must end before the business closing time.";
     }
 
@@ -593,22 +597,6 @@ function RoomPage() {
       return;
     }
 
-    if (hasFood) {
-      const foodPaymentError = validateGCash(
-        foodPayment,
-        foodPayerName,
-        foodPayerAccount,
-        foodPayRef,
-        foodProof,
-        "food payment",
-      );
-
-      if (foodPaymentError) {
-        toast.error(foodPaymentError);
-        return;
-      }
-    }
-
     if (roomPayment === "gcash" && !settings?.ewallet_account_number) {
       toast.error("The business GCash account has not been configured yet.");
       return;
@@ -649,11 +637,11 @@ function RoomPage() {
         _payer_account: roomPayment === "gcash" ? roomPayerAccount.trim() : null,
         _payment_ref: roomPayment === "gcash" ? roomPayRef.trim() : null,
 
-        // Independent food payment details
+        // Food payment is recorded separately and completed after room verification.
         _food_payment_method: hasFood ? foodPayment : "cash",
-        _food_payer_name: hasFood && foodPayment === "gcash" ? foodPayerName.trim() : null,
-        _food_payer_account: hasFood && foodPayment === "gcash" ? foodPayerAccount.trim() : null,
-        _food_payment_ref: hasFood && foodPayment === "gcash" ? foodPayRef.trim() : null,
+        _food_payer_name: null,
+        _food_payer_account: null,
+        _food_payment_ref: null,
       });
 
       if (error) {
@@ -691,25 +679,6 @@ function RoomPage() {
         );
       }
 
-      let foodOrderId: string | null = null;
-
-      if (hasFood) {
-        const { data: foodOrder, error: foodOrderError } = await supabase
-          .from("food_orders")
-          .select("id")
-          .eq("reservation_id", resId as string)
-          .maybeSingle();
-
-        if (foodOrderError || !foodOrder) {
-          toast.error(
-            "Your room booking was created, but we could not retrieve the food order. Please contact SONARA before making another booking.",
-          );
-        } else {
-          foodOrderId = foodOrder.id;
-        }
-      }
-
-      // Submit room payment proof independently.
       let roomProofMessage: string | null = null;
 
       if (roomPayment === "gcash" && roomProof) {
@@ -723,20 +692,6 @@ function RoomPage() {
         });
       }
 
-      // Submit food payment proof independently.
-      let foodProofMessage: string | null = null;
-
-      if (foodOrderId && foodPayment === "gcash" && foodProof) {
-        foodProofMessage = await uploadPaymentProof({
-          targetType: "food_order",
-          targetId: foodOrderId,
-          file: foodProof,
-          reference: foodPayRef,
-          payerName: foodPayerName,
-          payerAccount: foodPayerAccount,
-        });
-      }
-
       setReceipt({
         ref: reservation?.reference_code ?? "",
         date,
@@ -746,7 +701,6 @@ function RoomPage() {
         roomPayment,
         foodPayment: hasFood ? foodPayment : null,
         roomProofMessage,
-        foodProofMessage,
         roomTotal,
         foodTotal,
         items: cart.items.map((item) => ({
@@ -772,9 +726,9 @@ function RoomPage() {
 
       setStep(4);
 
-      if (roomProofMessage || foodProofMessage) {
+      if (roomProofMessage) {
         toast.warning(
-          "Your booking was created, but one or more payment proofs could not be submitted. Please contact SONARA before paying again.",
+          "Your booking was created, but the room payment proof could not be submitted. Please contact SONARA before paying again.",
         );
       } else {
         toast.success("Your booking has been submitted.");
@@ -957,10 +911,11 @@ function RoomPage() {
 
                   <p className="mt-1 text-sm font-semibold">{peso(receipt.foodTotal)}</p>
 
-                  <PaymentStatusMessage
-                    method={receipt.foodPayment}
-                    message={receipt.foodProofMessage}
-                  />
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {receipt.foodPayment === "cash"
+                      ? "Pay at the venue after your room payment is verified."
+                      : "Submit your GCash proof from My Bookings after your room payment is verified."}
+                  </p>
                 </div>
               )}
             </div>
@@ -1014,7 +969,11 @@ function RoomPage() {
                   <div className="mt-1.5 grid grid-cols-3 gap-2">
                     {starts.map((time) => {
                       const past = isPastStart(date, time);
-                      const tooShort = Number(time.slice(0, 2)) + minH > closeH;
+
+                      const tooShort =
+                        !settings ||
+                        !canFitDuration(settings.opening_time, settings.closing_time, time, minH);
+
                       const taken = isTaken(time, minH);
                       const unavailable = past || tooShort || taken;
 
@@ -1032,7 +991,15 @@ function RoomPage() {
                               },
                               (_, i) => minH + i,
                             ).filter(
-                              (h) => Number(time.slice(0, 2)) + h <= closeH && !isTaken(time, h),
+                              (h) =>
+                                !!settings &&
+                                canFitDuration(
+                                  settings.opening_time,
+                                  settings.closing_time,
+                                  time,
+                                  h,
+                                ) &&
+                                !isTaken(time, h),
                             );
 
                             setHours(availableHours[0] ?? minH);
@@ -1053,7 +1020,7 @@ function RoomPage() {
 
                   <p className="mt-2 text-xs text-muted-foreground">
                     Unavailable times are disabled. Pending reservations also hold their selected
-                    slots.
+                    slots, including reservations that continue past midnight.
                   </p>
                 </div>
 
@@ -1278,7 +1245,7 @@ function RoomPage() {
                   </div>
 
                   <p className="text-xs text-muted-foreground">
-                    Room and food payments are processed separately.
+                    Pay for the room first. Food payment is available after room payment verification.
                   </p>
                 </div>
 
@@ -1329,21 +1296,12 @@ function RoomPage() {
 
                     {foodPayment === "cash" ? (
                       <p className="text-sm text-muted-foreground">
-                        Pay for your food order separately in cash at the lounge.
+                        Pay at the lounge after your room payment is verified.
                       </p>
                     ) : (
-                      <GCashDetails
-                        settings={settings}
-                        payerName={foodPayerName}
-                        setPayerName={setFoodPayerName}
-                        payerAccount={foodPayerAccount}
-                        setPayerAccount={setFoodPayerAccount}
-                        payRef={foodPayRef}
-                        setPayRef={setFoodPayRef}
-                        proof={foodProof}
-                        setProof={setFoodProof}
-                        prefix="food"
-                      />
+                      <p className="text-sm text-muted-foreground">
+                        Submit your GCash proof from My Bookings after your room payment is verified.
+                      </p>
                     )}
                   </section>
                 )}

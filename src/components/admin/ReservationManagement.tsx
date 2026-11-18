@@ -481,7 +481,7 @@ export function ReservationManager({
         </Button>
       )}
 
-      {mode === "sessions" && (
+      {mode === "sessions" && onViewPayment && (
         <Button
           type="button"
           size="icon"
@@ -525,7 +525,7 @@ export function ReservationManager({
         </Button>
       )}
 
-      {mode === "sessions" && (
+      {mode === "sessions" && onViewPayment && (
         <Button
           type="button"
           size="sm"

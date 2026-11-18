@@ -3,7 +3,15 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { CalendarCheck, CalendarClock, ChefHat, LayoutDashboard, LogOut, Mic2 } from "lucide-react";
+import {
+  CalendarCheck,
+  CalendarClock,
+  ChefHat,
+  CreditCard,
+  LayoutDashboard,
+  LogOut,
+  Mic2,
+} from "lucide-react";
 
 import {
   AlertDialog,
@@ -47,7 +55,13 @@ import { useAuth } from "@/lib/auth";
 import { initials, useMyProfile } from "@/lib/avatar";
 import { supabase } from "@/integrations/supabase/client";
 
-export type StaffSection = "dashboard" | "reservations" | "schedule" | "sessions" | "orders";
+export type StaffSection =
+  | "dashboard"
+  | "reservations"
+  | "schedule"
+  | "sessions"
+  | "orders"
+  | "transactions";
 
 type Item = {
   key: StaffSection;
@@ -99,6 +113,16 @@ const NAV: {
       },
     ],
   },
+  {
+    label: "FINANCE",
+    items: [
+      {
+        key: "transactions",
+        title: "Transactions",
+        icon: CreditCard,
+      },
+    ],
+  },
 ];
 
 export const STAFF_SECTION_TITLES: Record<StaffSection, string> = {
@@ -107,6 +131,7 @@ export const STAFF_SECTION_TITLES: Record<StaffSection, string> = {
   schedule: "Room Schedule",
   sessions: "Room Sessions",
   orders: "Food Orders",
+  transactions: "Transactions",
 };
 
 type StaffShellProps = {

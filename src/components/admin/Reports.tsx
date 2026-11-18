@@ -30,6 +30,7 @@ import {
 
 import { supabase } from "@/integrations/supabase/client";
 import { peso, fmtDate, durationHours } from "@/lib/afterglow";
+import { calculateCollectedRevenue } from "@/lib/revenue";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useProfiles, type ResRow, type OrderRow } from "./shared";
 
@@ -725,28 +726,12 @@ export function Reports({ res, orders }: ReportsProps) {
     });
   }, [dateOrders, selectedRoom, search, profiles]);
 
-  const paidReservations = useMemo(
-    () =>
-      dateReservations.filter(
-        (item) =>
-          item.payment_status === "paid" && !["rejected", "cancelled"].includes(item.status),
-      ),
-    [dateReservations],
+  const collectedRevenue = useMemo(
+    () => calculateCollectedRevenue(dateReservations, dateOrders),
+    [dateReservations, dateOrders],
   );
-
-  const paidOrders = useMemo(
-    () =>
-      dateOrders.filter((item) => item.payment_status === "paid" && item.status !== "cancelled"),
-    [dateOrders],
-  );
-
-  const roomRevenue = paidReservations.reduce((sum, item) => sum + Number(item.room_total || 0), 0);
-
-  const foodRevenue = paidOrders.reduce((sum, item) => sum + Number(item.food_subtotal || 0), 0);
-
-  const totalRevenue = roomRevenue + foodRevenue;
-  const transactionCount = paidReservations.length + paidOrders.length;
-
+  const { paidReservations, paidOrders, roomRevenue, foodRevenue, totalRevenue, transactionCount } =
+    collectedRevenue;
   const averageTransaction = transactionCount ? totalRevenue / transactionCount : 0;
 
   const statusCounts = {

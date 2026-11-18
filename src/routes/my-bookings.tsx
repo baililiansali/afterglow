@@ -959,11 +959,14 @@ function MyBookings() {
                                 targetId={order.id}
                                 userId={user.id}
                                 paymentStatus={order.payment_status}
+                                roomPaymentStatus={order.reservation.payment_status}
                               />
                             ) : (
                               <div className="flex items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
                                 <Wallet className="h-4 w-4" />
-                                Pay at the venue
+                                {order.reservation.payment_status === "paid"
+                                  ? "Pay at the venue"
+                                  : "Room payment must be verified first"}
                               </div>
                             )}
                           </div>
@@ -1101,11 +1104,13 @@ function PaymentProofForm({
   targetId,
   userId,
   paymentStatus,
+  roomPaymentStatus,
 }: {
   targetType: PaymentTarget;
   targetId: string;
   userId: string;
   paymentStatus: string;
+  roomPaymentStatus?: string;
 }) {
   const qc = useQueryClient();
 
@@ -1138,6 +1143,7 @@ function PaymentProofForm({
 
   const { data: proofs, isLoading: proofsLoading } = useQuery({
     queryKey: proofQueryKey,
+    enabled: targetType !== "food_order" || roomPaymentStatus === "paid",
     queryFn: async () => {
       const query =
         targetType === "reservation"
@@ -1153,8 +1159,14 @@ function PaymentProofForm({
   });
 
   const hasPendingProof = (proofs ?? []).some((proof) => proof.status === "pending");
+  const foodPaymentBlocked =
+    targetType === "food_order" && roomPaymentStatus !== "paid";
 
   const submitPaymentProof = async () => {
+    if (foodPaymentBlocked) {
+      return void toast.error("Room payment must be verified before paying for food.");
+    }
+
     if (paymentStatus === "paid") {
       return void toast.info("This transaction has already been paid.");
     }
@@ -1241,6 +1253,14 @@ function PaymentProofForm({
       <div className="flex items-center justify-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 className="h-4 w-4" />
         Paid
+      </div>
+    );
+  }
+
+  if (foodPaymentBlocked) {
+    return (
+      <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-center text-sm text-amber-700 dark:text-amber-300">
+        Room payment must be verified before paying for food.
       </div>
     );
   }

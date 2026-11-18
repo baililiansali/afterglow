@@ -24,6 +24,7 @@ import { StaffReservations, type ResRow } from "@/components/staff/StaffReservat
 import { StaffRoomSchedule } from "@/components/staff/StaffRoomSchedule";
 import { StaffRoomSessions } from "@/components/staff/StaffRoomSessions";
 import { StaffFoodOrders, type OrderRow } from "@/components/staff/StaffFoodOrders";
+import { Payments } from "@/components/admin/Payments";
 
 const STAFF_SECTIONS: StaffSection[] = [
   "dashboard",
@@ -31,6 +32,7 @@ const STAFF_SECTIONS: StaffSection[] = [
   "schedule",
   "sessions",
   "orders",
+  "transactions",
 ];
 
 const OPENING_MINUTES = 14 * 60;
@@ -1091,21 +1093,33 @@ export const Route = createFileRoute("/staff")({
       throw redirect({ to: "/login" });
     }
 
-    const { data: roleData, error } = await supabase
+    const { data: roleRows, error: roleError } = await supabase
       .from("user_roles")
       .select("role")
-      .eq("user_id", session.user.id)
-      .maybeSingle();
+      .eq("user_id", session.user.id);
 
-    if (error || !roleData) {
+    if (roleError || !roleRows?.length) {
       throw redirect({ to: "/login" });
     }
 
-    if (roleData.role === "admin") {
+    const roles = roleRows.map((row) => row.role);
+
+    if (roles.includes("admin")) {
       throw redirect({ to: "/admin" });
     }
 
-    if (roleData.role !== "staff") {
+    if (!roles.includes("staff")) {
+      throw redirect({ to: "/login" });
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("is_active")
+      .eq("id", session.user.id)
+      .maybeSingle();
+
+    if (profileError || !profile?.is_active) {
+      await supabase.auth.signOut();
       throw redirect({ to: "/login" });
     }
   },
@@ -1117,6 +1131,7 @@ function StaffPage() {
   const navigate = useNavigate({ from: "/staff" });
   const queryClient = useQueryClient();
   const { section } = Route.useSearch();
+  const [paymentTargetOrderId, setPaymentTargetOrderId] = useState<string | null>(null);
 
   const changeSection = (nextSection: StaffSection) => {
     void navigate({
@@ -1268,8 +1283,13 @@ function StaffPage() {
     ]);
   };
 
-  const handleRestrictedPayment = () => {
-    toast.info("Please ask an administrator to manage payment records.");
+  const handleViewPayment = (orderId: string) => {
+    setPaymentTargetOrderId(orderId);
+    changeSection("transactions");
+  };
+
+  const handlePaymentTargetHandled = () => {
+    setPaymentTargetOrderId(null);
   };
 
   if (isLoading) {
@@ -1326,13 +1346,23 @@ function StaffPage() {
       break;
 
     case "sessions":
-      content = (
-        <StaffRoomSessions reservations={reservations} onViewPayment={handleRestrictedPayment} />
-      );
+      content = <StaffRoomSessions reservations={reservations} />;
       break;
 
     case "orders":
-      content = <StaffFoodOrders orders={orders} onViewPayment={handleRestrictedPayment} />;
+      content = <StaffFoodOrders orders={orders} onViewPayment={handleViewPayment} />;
+      break;
+
+    case "transactions":
+      content = (
+        <Payments
+          res={reservations}
+          orders={orders}
+          mode="staff"
+          paymentTargetOrderId={paymentTargetOrderId}
+          onPaymentTargetHandled={handlePaymentTargetHandled}
+        />
+      );
       break;
 
     default:

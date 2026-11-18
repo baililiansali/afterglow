@@ -59,6 +59,7 @@ function useReservationPaymentProof(reservationId: string | undefined) {
   return useQuery({
     queryKey: ["reservation-payment-proof", reservationId],
     enabled: !!reservationId,
+    refetchOnMount: "always",
 
     queryFn: async (): Promise<PaymentProof | null> => {
       if (!reservationId) return null;
@@ -181,7 +182,7 @@ function PaymentProofSection({
   } = useReservationPaymentProof(reservationId);
 
   return (
-    <DetailSection title="GCash Payment Proof">
+    <DetailSection title="Uploaded Payment Proof">
       {isLoading && (
         <div className="py-4 text-sm text-muted-foreground">
           Loading payment proof...

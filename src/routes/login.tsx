@@ -83,6 +83,21 @@ function Login() {
           const isAdmin = roles?.some((item) => item.role === "admin");
           const isStaff = roles?.some((item) => item.role === "staff");
 
+          if (isStaff) {
+            const { data: profile, error: profileError } = await supabase
+              .from("profiles")
+              .select("is_active")
+              .eq("id", user.id)
+              .maybeSingle();
+
+            if (profileError) throw profileError;
+
+            if (!profile?.is_active) {
+              await supabase.auth.signOut();
+              throw new Error("This staff account has been deactivated.");
+            }
+          }
+
           if (isAdmin) {
             destination = "/admin";
           } else if (isStaff) {
@@ -91,7 +106,7 @@ function Login() {
         }
 
         toast.success("Welcome back!");
-        navigate({ to: destination });
+        navigate({ to: destination, replace: true });
       } else if (mode === "signup") {
         const { error } = await supabase.auth.signUp({
           email,
